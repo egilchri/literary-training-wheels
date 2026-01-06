@@ -1,4 +1,5 @@
 import os, sys, re
+import ebooklib
 from ebooklib import epub
 
 def create_bilingual_epub(txt_source, output_epub, max_sections=None):
