@@ -13,13 +13,13 @@ def create_bilingual_epub(txt_source, output_epub, max_sections=None):
         .original-text { color: #1a1a1a; margin-bottom: 2em; }
         .original-text p { text-align: justify; text-indent: 1.5em; margin-bottom: 0.8em; }
         
-        /* New Blockquote Style for Translation */
         .translation-block { 
             background-color: #f9f9f9; 
             border-left: 5px solid #005a9c; 
             margin: 1.5em 0; 
             padding: 1em 1.5em;
             font-family: "Helvetica", sans-serif;
+            display: block; /* Ensure visibility */
         }
         .translation-label {
             font-weight: bold;
@@ -34,6 +34,7 @@ def create_bilingual_epub(txt_source, output_epub, max_sections=None):
             color: #444444; 
             margin-bottom: 0.8em;
             text-indent: 0;
+            display: block;
         }
     '''
     nav_css = epub.EpubItem(uid="style_nav", file_name="style/nav.css", media_type="text/css", content=style)
@@ -58,11 +59,10 @@ def create_bilingual_epub(txt_source, output_epub, max_sections=None):
         # 1. CLEAN ARTIFACTS
         clean_chunk = re.sub(r'### SECTION \d+ (ORIGINAL|METADATA)', '', chunk)
         
-        # 2. CONVERT DETAILS TO BLOCKQUOTE
-        # We replace the <details> and <summary> tags with our new <div> structure
-        # This is much more compatible with E-readers.
-        html_content = clean_chunk.replace("<details class='modern-translation'>", f"<div id='{anchor_id}' class='translation-block'>")
-        html_content = html_content.replace("<summary>Click to show contemporary translation</summary>", "<span class='translation-label'>Contemporary Translation</span>")
+        # 2. ROBUST REPLACEMENT: Convert <details> to <div> regardless of quote style
+        # This handles both 'modern-translation' and "modern-translation"
+        html_content = re.sub(r'<details[^>]*>', f'<div id="{anchor_id}" class="translation-block">', clean_chunk)
+        html_content = re.sub(r'<summary[^>]*>.*?</summary>', '<span class="translation-label">Contemporary Translation</span>', html_content)
         html_content = html_content.replace("</details>", "</div>")
         
         # 3. TOC LOGIC
@@ -80,8 +80,6 @@ def create_bilingual_epub(txt_source, output_epub, max_sections=None):
         file_name = f'section_{section_num}.xhtml'
         chapter = epub.EpubHtml(title=display_title, file_name=file_name, lang='en')
         chapter.add_link(href='style/nav.css', rel='stylesheet', type='text/css')
-        
-        # ebooklib handles the XHTML wrapping automatically
         chapter.content = html_content
         
         book.add_item(chapter)
@@ -93,9 +91,9 @@ def create_bilingual_epub(txt_source, output_epub, max_sections=None):
     book.spine = ['nav'] + [item for item in book.get_items_of_type(ebooklib.ITEM_DOCUMENT)]
     
     epub.write_epub(output_epub, book, {})
-    print(f"[SUCCESS] EPUB created with Blockquote style: {output_epub}")
+    print(f"[SUCCESS] EPUB created with robust blockquote rendering: {output_epub}")
 
 if __name__ == "__main__":
     if len(sys.argv) > 2:
         create_bilingual_epub(sys.argv[1], sys.argv[2], int(sys.argv[3]) if len(sys.argv) > 3 else None)
-
+        
