@@ -9,7 +9,7 @@ MODEL_ID = "gemini-2.0-flash-lite"
 PROGRESS_FILE = ".translation_progress"
 client = genai.Client(api_key=API_KEY)
 
-def run_interleaved_translation(epub_path, limit=None):
+def run_interleaved_translation(epub_path, frequency=1, limit=None):
     start_section = 0
     if os.path.exists(PROGRESS_FILE):
         with open(PROGRESS_FILE, "r") as f:
@@ -17,20 +17,27 @@ def run_interleaved_translation(epub_path, limit=None):
 
     book = epub.read_epub(epub_path)
     
-    # --- STEP 1: PRESERVE ORIGINAL STRUCTURE & CHAPTERS ---
-    chunks = []
+    # --- STEP 1: EXTRACT ALL ELEMENTS ---
+    all_elements = []
     for item in book.get_items_of_type(ebooklib.ITEM_DOCUMENT):
         soup = BeautifulSoup(item.get_content(), 'html.parser')
         elements = soup.find_all(['h1', 'h2', 'h3', 'p'])
-        if elements:
-            text_block = "\n".join([str(el) for el in elements])
-            if len(text_block) > 30:
-                chunks.append(text_block)
+        all_elements.extend(elements)
+
+    # --- STEP 2: GROUP ELEMENTS BY FREQUENCY ---
+    # We group 'frequency' number of paragraphs/headers into a single chunk
+    chunks = []
+    for i in range(0, len(all_elements), frequency):
+        group = all_elements[i:i + frequency]
+        text_block = "\n".join([str(el) for el in group])
+        if len(text_block) > 10: # Avoid tiny fragments
+            chunks.append(text_block)
 
     output_file = os.path.splitext(epub_path)[0] + "_Bilingual.txt"
     end_section = min(start_section + limit, len(chunks)) if limit else len(chunks)
 
     print(f"[*] Resuming from Section {start_section + 1}...")
+    print(f"[*] Frequency set to: {frequency} original paragraphs per translation.")
 
     for i in range(start_section, end_section):
         original_html_chunk = chunks[i]
@@ -38,7 +45,7 @@ def run_interleaved_translation(epub_path, limit=None):
         text_for_ai = BeautifulSoup(original_html_chunk, 'html.parser').get_text()
         
         time.sleep(20) 
-        print(f"[*] Section {i+1}: Translating...", end=" ", flush=True)
+        print(f"[*] Section {i+1}: Translating chunk...", end=" ", flush=True)
         
         try:
             response = client.models.generate_content(
@@ -59,7 +66,6 @@ def run_interleaved_translation(epub_path, limit=None):
                 f.write(original_html_chunk + "\n")
                 f.write(f"</div>\n")
                    
-                # --- CHANGED: Standard div structure instead of <details> ---
                 f.write(f"\n<div class='translation-block'>\n")
                 f.write(f"  <span class='translation-label'>Contemporary Translation</span>\n")
                 f.write(f"  <div class='translation-content'>\n")
@@ -78,5 +84,11 @@ def run_interleaved_translation(epub_path, limit=None):
 
 if __name__ == "__main__":
     if len(sys.argv) > 1:
-        run_interleaved_translation(sys.argv[1], int(sys.argv[2]) if len(sys.argv) > 2 else None)
+        # Args: [1] epub, [2] frequency, [3] limit
+        epub_file = sys.argv[1]
+        freq = int(sys.argv[2]) if len(sys.argv) > 2 else 1
+        lim = int(sys.argv[3]) if len(sys.argv) > 3 else None
+        run_interleaved_translation(epub_file, freq, lim)
+    else:
+        print("[!] Usage: python3 translate_epub.py [EPUB] [FREQUENCY] [LIMIT]")
 
