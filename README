@@ -1,0 +1,5 @@
+rm .translation_progress TurnOfTheScrew_Bilingual.txt
+
+python3 ./translate_epub.py TurnOfTheScrew.epub 5
+
+python3 ./build_epub.py TurnOfTheScrew_Bilingual.txt TurnOfTheScrew_Bilingual.epub
