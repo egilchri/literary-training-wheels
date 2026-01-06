@@ -13,7 +13,10 @@ def run_interleaved_translation(epub_path, frequency=1, limit=None):
     start_section = 0
     if os.path.exists(PROGRESS_FILE):
         with open(PROGRESS_FILE, "r") as f:
-            start_section = int(f.read().strip())
+            try:
+                start_section = int(f.read().strip())
+            except ValueError:
+                start_section = 0
 
     book = epub.read_epub(epub_path)
     
@@ -25,32 +28,35 @@ def run_interleaved_translation(epub_path, frequency=1, limit=None):
         all_elements.extend(elements)
 
     # --- STEP 2: GROUP ELEMENTS BY FREQUENCY ---
-    # We group 'frequency' number of paragraphs/headers into a single chunk
     chunks = []
     for i in range(0, len(all_elements), frequency):
         group = all_elements[i:i + frequency]
         text_block = "\n".join([str(el) for el in group])
-        if len(text_block) > 10: # Avoid tiny fragments
+        if len(text_block.strip()) > 10: 
             chunks.append(text_block)
 
     output_file = os.path.splitext(epub_path)[0] + "_Bilingual.txt"
+    
+    # Calculate exactly where to stop based on the limit
     end_section = min(start_section + limit, len(chunks)) if limit else len(chunks)
 
-    print(f"[*] Resuming from Section {start_section + 1}...")
-    print(f"[*] Frequency set to: {frequency} original paragraphs per translation.")
+    print(f"[*] Resuming from Chunk {start_section + 1}...")
+    print(f"[*] Frequency: {frequency} paragraphs/headers per block.")
+    if limit:
+        print(f"[*] Limit: Processing {limit} chunks this session.")
 
     for i in range(start_section, end_section):
         original_html_chunk = chunks[i]
-        is_metadata = "Title" in original_html_chunk or "Author" in original_html_chunk
+        is_metadata = any(word in original_html_chunk for word in ["Title", "Author", "Gutenberg"])
         text_for_ai = BeautifulSoup(original_html_chunk, 'html.parser').get_text()
         
-        time.sleep(20) 
-        print(f"[*] Section {i+1}: Translating chunk...", end=" ", flush=True)
+        time.sleep(20) # Avoid rate limits
+        print(f"[*] Chunk {i+1}/{len(chunks)}: Translating...", end=" ", flush=True)
         
         try:
             response = client.models.generate_content(
                 model=MODEL_ID,
-                config={'system_instruction': "Translate this literary prose into clear, contemporary English. Maintain the exact same paragraph count and structure. Do not add introductory remarks."},
+                config={'system_instruction': "Translate this literary prose into clear, contemporary English. Maintain paragraph structure. Do not add intro remarks."},
                 contents=text_for_ai[:12000]
             )
             
@@ -59,10 +65,8 @@ def run_interleaved_translation(epub_path, frequency=1, limit=None):
             
             with open(output_file, "a", encoding="utf-8") as f:
                 f.write(f"\n<div class='original-text justify-text'>\n")
-                if is_metadata:
-                    f.write(f"### SECTION {i+1} METADATA\n")
-                else:
-                    f.write(f"### SECTION {i+1} ORIGINAL\n")
+                label = "METADATA" if is_metadata else "ORIGINAL"
+                f.write(f"### SECTION {i+1} {label}\n")
                 f.write(original_html_chunk + "\n")
                 f.write(f"</div>\n")
                    
@@ -84,11 +88,13 @@ def run_interleaved_translation(epub_path, frequency=1, limit=None):
 
 if __name__ == "__main__":
     if len(sys.argv) > 1:
-        # Args: [1] epub, [2] frequency, [3] limit
-        epub_file = sys.argv[1]
+        target_epub = sys.argv[1]
+        # Arg 2: Frequency (default to 1 for original behavior)
         freq = int(sys.argv[2]) if len(sys.argv) > 2 else 1
+        # Arg 3: Limit (number of chunks to process)
         lim = int(sys.argv[3]) if len(sys.argv) > 3 else None
-        run_interleaved_translation(epub_file, freq, lim)
+        
+        run_interleaved_translation(target_epub, freq, lim)
     else:
         print("[!] Usage: python3 translate_epub.py [EPUB] [FREQUENCY] [LIMIT]")
-
+        
