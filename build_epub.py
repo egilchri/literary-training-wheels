@@ -8,12 +8,10 @@ def create_bilingual_epub(txt_source, output_epub, max_sections=None):
     book.set_language('en')
     book.add_author('Henry James / Gemini AI')
 
-    # Updated CSS for the Blockquote/Distinct Box style
     style = '''
         body { font-family: "Georgia", serif; padding: 2em; line-height: 1.8; }
         .original-text { color: #1a1a1a; margin-bottom: 2em; }
         .original-text p { text-align: justify; text-indent: 1.5em; margin-bottom: 0.8em; }
-        
         .translation-block { 
             background-color: #f9f9f9; 
             border-left: 5px solid #005a9c; 
@@ -44,7 +42,6 @@ def create_bilingual_epub(txt_source, output_epub, max_sections=None):
     with open(txt_source, 'r', encoding='utf-8') as f:
         full_content = f.read()
 
-    # Split by the separator used in translation_epub.py
     all_chunks = full_content.split('========================================')
     if max_sections:
         all_chunks = all_chunks[:max_sections]
@@ -56,53 +53,43 @@ def create_bilingual_epub(txt_source, output_epub, max_sections=None):
             continue
         
         section_num = idx + 1
-        anchor_id = f"trans_{section_num}"
         
-        # 1. CLEAN ARTIFACTS
+        # 1. CLEANUP TECHNICAL LABELS
         clean_chunk = re.sub(r'### SECTION \d+ (ORIGINAL|METADATA)', '', chunk)
         
-        # 2. ROBUST REPLACEMENT: Convert <details> to <div> regardless of quote style
-        # This regex replaces any <details ...> tag with our new div and anchor ID
-        html_content = re.sub(r'<details[^>]*>', f'<div id="{anchor_id}" class="translation-block">', clean_chunk)
-        # Replaces the interactive <summary> with a static label
-        html_content = re.sub(r'<summary[^>]*>.*?</summary>', '<span class="translation-label">Contemporary Translation</span>', html_content)
-        # Closes the block
-        html_content = html_content.replace("</details>", "</div>")
+        # 2. ADVANCED CHAPTER DETECTION
+        # Find all Roman numerals inside <p> or <h> tags in this chunk
+        found_chapters = re.findall(r'<(?:p|h\d)>([IVXLCDM\d]+)</(?:p|h\d)>', chunk)
         
-        # 3. TOC LOGIC
-        match = re.search(r'<p>([IVXLCDM\d]+)</p>', chunk)
-        if match:
-            display_title = f"Chapter {match.group(1)}"
-            link_target = f"section_{section_num}.xhtml"
+        if found_chapters:
+            if len(found_chapters) > 1:
+                display_title = f"Chapters {', '.join(found_chapters)}"
+            else:
+                display_title = f"Chapter {found_chapters[0]}"
         elif "METADATA" in chunk:
             display_title = "Title & Introduction"
-            link_target = f"section_{section_num}.xhtml"
         else:
             display_title = "Contemporary Checkpoint"
-            link_target = f"section_{section_num}.xhtml#{anchor_id}"
 
         file_name = f'section_{section_num}.xhtml'
         chapter = epub.EpubHtml(title=display_title, file_name=file_name, lang='en')
         chapter.add_link(href='style/nav.css', rel='stylesheet', type='text/css')
-        chapter.content = html_content
+        
+        # Wrapping in basic HTML structure for stability
+        chapter.content = f'<html><head></head><body>{clean_chunk}</body></html>'
         
         book.add_item(chapter)
-        epub_chapters.append(epub.Link(link_target, display_title, f"link_{section_num}"))
+        epub_chapters.append(chapter)
 
     book.toc = tuple(epub_chapters)
     book.add_item(epub.EpubNcx())
     book.add_item(epub.EpubNav())
-    book.spine = ['nav'] + [item for item in book.get_items_of_type(ebooklib.ITEM_DOCUMENT)]
+    book.spine = ['nav'] + epub_chapters
     
     epub.write_epub(output_epub, book, {})
-    print(f"[SUCCESS] EPUB created with robust blockquote rendering: {output_epub}")
+    print(f"[SUCCESS] Multi-chapter aware EPUB created: {output_epub}")
 
 if __name__ == "__main__":
     if len(sys.argv) > 2:
-        SOURCE = sys.argv[1]
-        TARGET = sys.argv[2]
-        LIMIT = int(sys.argv[3]) if len(sys.argv) > 3 else None
-        create_bilingual_epub(SOURCE, TARGET, LIMIT)
-    else:
-        print("[!] Usage: python3 build_epub.py [SOURCE_TXT] [TARGET_EPUB] [OPTIONAL_LIMIT]")
+        create_bilingual_epub(sys.argv[1], sys.argv[2], int(sys.argv[3]) if len(sys.argv) > 3 else None)
 
