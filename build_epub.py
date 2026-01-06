@@ -1,15 +1,13 @@
 import os, sys, re, ebooklib
-import ebooklib
 from ebooklib import epub
 
 def create_bilingual_epub(txt_source, output_epub, max_sections=None):
     book = epub.EpubBook()
     book.set_identifier('id123456')
-    book.set_title('The Turn of the Screw (Bilingual Edition)')
+    book.set_title('The Wings of the Dove (Bilingual Edition)')
     book.set_language('en')
     book.add_author('Henry James / Gemini AI')
 
-    # Styles remain the same
     style = '''
         body { font-family: "Georgia", serif; padding: 2em; line-height: 1.8; }
         .original-text { color: #1a1a1a; border-bottom: 1px solid #eeeeee; padding-bottom: 1em; margin-bottom: 2em; }
@@ -37,25 +35,23 @@ def create_bilingual_epub(txt_source, output_epub, max_sections=None):
         section_num = idx + 1
         anchor_id = f"trans_{section_num}"
         
-        # 1. CLEAN ARTIFACTS
+        # 1. REMOVE ARTIFACTS: Strip the "### SECTION X ORIGINAL" labels
         clean_chunk = re.sub(r'### SECTION \d+ (ORIGINAL|METADATA)', '', chunk)
         
-        # 2. TARGETED ANCHOR: Insert the ID directly into the <details> tag
-        # This ensures the link jumps specifically to the translation block
-        html_content = clean_chunk.replace("<details", f"<details id='{anchor_id}'", 1)
+        # 2. TARGETED ANCHOR: Use regex to insert the ID into the <details> tag 
+        # specifically, even if it has a class attribute.
+        html_content = re.sub(r'<details', f'<details id="{anchor_id}"', clean_chunk, count=1)
         
-        # 3. TOC LOGIC
+        # 3. TOC LOGIC: Detect Chapter Roman Numerals
         match = re.search(r'<p>([IVXLCDM\d]+)</p>', chunk)
         if match:
             display_title = f"Chapter {match.group(1)}"
-            # Link for a chapter goes to the top of the file
             link_target = f"section_{section_num}.xhtml"
         elif "METADATA" in chunk:
             display_title = "Title & Introduction"
             link_target = f"section_{section_num}.xhtml"
         else:
             display_title = "Contemporary Checkpoint"
-            # Link for a checkpoint goes specifically to the anchor ID
             link_target = f"section_{section_num}.xhtml#{anchor_id}"
 
         file_name = f'section_{section_num}.xhtml'
@@ -64,16 +60,26 @@ def create_bilingual_epub(txt_source, output_epub, max_sections=None):
         chapter.content = f"<html><head></head><body>{html_content}</body></html>"
         
         book.add_item(chapter)
+        
+        # Point TOC to file AND anchor for checkpoints
         epub_chapters.append(epub.Link(link_target, display_title, f"link_{section_num}"))
 
     book.toc = tuple(epub_chapters)
     book.add_item(epub.EpubNcx())
     book.add_item(epub.EpubNav())
+    
+    # Reading order definition
     book.spine = ['nav'] + [item for item in book.get_items_of_type(ebooklib.ITEM_DOCUMENT)]
     
     epub.write_epub(output_epub, book, {})
-    print(f"[SUCCESS] EPUB created with precise jump-to anchors.")
+    print(f"[SUCCESS] Cleaned EPUB created: {output_epub}")
 
 if __name__ == "__main__":
     if len(sys.argv) > 2:
-        create_bilingual_epub(sys.argv[1], sys.argv[2], int(sys.argv[3]) if len(sys.argv) > 3 else None)
+        SOURCE = sys.argv[1]
+        TARGET = sys.argv[2]
+        LIMIT = int(sys.argv[3]) if len(sys.argv) > 3 else None
+        create_bilingual_epub(SOURCE, TARGET, LIMIT)
+    else:
+        print("[!] Usage: python3 build_epub.py [SOURCE_TXT] [TARGET_EPUB] [OPTIONAL_LIMIT]")
+
