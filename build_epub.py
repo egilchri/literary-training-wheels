@@ -22,6 +22,7 @@ def create_bilingual_epub(txt_source, output_epub, max_sections=None):
     with open(txt_source, 'r', encoding='utf-8') as f:
         full_content = f.read()
 
+    # Split by the separator used in translation_epub.py
     all_chunks = full_content.split('========================================')
     if max_sections:
         all_chunks = all_chunks[:max_sections]
@@ -36,9 +37,11 @@ def create_bilingual_epub(txt_source, output_epub, max_sections=None):
         anchor_id = f"trans_{section_num}"
         
         # 1. CLEAN ARTIFACTS
+        # Strips out our technical notes like "### SECTION 1 ORIGINAL"
         clean_chunk = re.sub(r'### SECTION \d+ (ORIGINAL|METADATA)', '', chunk)
         
         # 2. TARGETED ANCHOR
+        # Injects the anchor ID into the <details> tag for TOC jumping
         html_content = re.sub(r'<details', f'<details id="{anchor_id}"', clean_chunk, count=1)
         
         # 3. TOC LOGIC
@@ -57,8 +60,8 @@ def create_bilingual_epub(txt_source, output_epub, max_sections=None):
         chapter = epub.EpubHtml(title=display_title, file_name=file_name, lang='en')
         chapter.add_link(href='style/nav.css', rel='stylesheet', type='text/css')
         
-        # FIX: Ensure content is wrapped correctly so tags like <details> are not escaped
-        chapter.content = f'<?xml version="1.0" encoding="utf-8"?>\n<!DOCTYPE html>\n<html xmlns="http://www.w3.org/1999/xhtml">\n<head></head>\n<body>{html_content}</body>\n</html>'
+        # FIX: Simply provide the html_content. ebooklib will wrap it correctly.
+        chapter.content = html_content
         
         book.add_item(chapter)
         epub_chapters.append(epub.Link(link_target, display_title, f"link_{section_num}"))
