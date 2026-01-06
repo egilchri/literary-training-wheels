@@ -8,6 +8,7 @@ def create_bilingual_epub(txt_source, output_epub, max_sections=None):
     book.set_language('en')
     book.add_author('Henry James / Gemini AI')
 
+    # Updated CSS for the Blockquote/Distinct Box style
     style = '''
         body { font-family: "Georgia", serif; padding: 2em; line-height: 1.8; }
         .original-text { color: #1a1a1a; margin-bottom: 2em; }
@@ -19,7 +20,7 @@ def create_bilingual_epub(txt_source, output_epub, max_sections=None):
             margin: 1.5em 0; 
             padding: 1em 1.5em;
             font-family: "Helvetica", sans-serif;
-            display: block; /* Ensure visibility */
+            display: block;
         }
         .translation-label {
             font-weight: bold;
@@ -43,6 +44,7 @@ def create_bilingual_epub(txt_source, output_epub, max_sections=None):
     with open(txt_source, 'r', encoding='utf-8') as f:
         full_content = f.read()
 
+    # Split by the separator used in translation_epub.py
     all_chunks = full_content.split('========================================')
     if max_sections:
         all_chunks = all_chunks[:max_sections]
@@ -60,9 +62,11 @@ def create_bilingual_epub(txt_source, output_epub, max_sections=None):
         clean_chunk = re.sub(r'### SECTION \d+ (ORIGINAL|METADATA)', '', chunk)
         
         # 2. ROBUST REPLACEMENT: Convert <details> to <div> regardless of quote style
-        # This handles both 'modern-translation' and "modern-translation"
+        # This regex replaces any <details ...> tag with our new div and anchor ID
         html_content = re.sub(r'<details[^>]*>', f'<div id="{anchor_id}" class="translation-block">', clean_chunk)
+        # Replaces the interactive <summary> with a static label
         html_content = re.sub(r'<summary[^>]*>.*?</summary>', '<span class="translation-label">Contemporary Translation</span>', html_content)
+        # Closes the block
         html_content = html_content.replace("</details>", "</div>")
         
         # 3. TOC LOGIC
@@ -95,5 +99,10 @@ def create_bilingual_epub(txt_source, output_epub, max_sections=None):
 
 if __name__ == "__main__":
     if len(sys.argv) > 2:
-        create_bilingual_epub(sys.argv[1], sys.argv[2], int(sys.argv[3]) if len(sys.argv) > 3 else None)
-        
+        SOURCE = sys.argv[1]
+        TARGET = sys.argv[2]
+        LIMIT = int(sys.argv[3]) if len(sys.argv) > 3 else None
+        create_bilingual_epub(SOURCE, TARGET, LIMIT)
+    else:
+        print("[!] Usage: python3 build_epub.py [SOURCE_TXT] [TARGET_EPUB] [OPTIONAL_LIMIT]")
+
