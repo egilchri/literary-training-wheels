@@ -3,6 +3,7 @@ from ebooklib import epub
 from bs4 import BeautifulSoup
 from google import genai
 
+
 # --- CONFIGURATION ---
 API_KEY = os.environ.get("GEMINI_API_KEY")
 MODEL_ID = "gemini-2.0-flash-lite"

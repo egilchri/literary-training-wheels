@@ -1,6 +1,7 @@
 import os, sys, re
 from ebooklib import epub
 
+
 def create_bilingual_epub(txt_source, output_epub, max_sections=None):
     book = epub.EpubBook()
     book.set_identifier('id123456')
