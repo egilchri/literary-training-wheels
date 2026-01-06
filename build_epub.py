@@ -10,11 +10,31 @@ def create_bilingual_epub(txt_source, output_epub, max_sections=None):
 
     style = '''
         body { font-family: "Georgia", serif; padding: 2em; line-height: 1.8; }
-        .original-text { color: #1a1a1a; border-bottom: 1px solid #eeeeee; padding-bottom: 1em; margin-bottom: 2em; }
+        .original-text { color: #1a1a1a; margin-bottom: 2em; }
         .original-text p { text-align: justify; text-indent: 1.5em; margin-bottom: 0.8em; }
-        summary { font-family: "Helvetica", sans-serif; font-size: 0.9em; color: #005a9c; cursor: pointer; padding: 8px; background: #f0f4f8; border-radius: 4px; outline: none; }
-        .translation-content { background-color: #fdfdfd; padding: 20px; border-left: 4px solid #005a9c; margin-top: 10px; }
-        .translation-content p { font-family: "Helvetica", sans-serif; font-style: italic; color: #444444; text-indent: 0; text-align: left; }
+        
+        /* New Blockquote Style for Translation */
+        .translation-block { 
+            background-color: #f9f9f9; 
+            border-left: 5px solid #005a9c; 
+            margin: 1.5em 0; 
+            padding: 1em 1.5em;
+            font-family: "Helvetica", sans-serif;
+        }
+        .translation-label {
+            font-weight: bold;
+            color: #005a9c;
+            font-size: 0.8em;
+            text-transform: uppercase;
+            margin-bottom: 0.5em;
+            display: block;
+        }
+        .translation-content p { 
+            font-style: italic; 
+            color: #444444; 
+            margin-bottom: 0.8em;
+            text-indent: 0;
+        }
     '''
     nav_css = epub.EpubItem(uid="style_nav", file_name="style/nav.css", media_type="text/css", content=style)
     book.add_item(nav_css)
@@ -22,7 +42,6 @@ def create_bilingual_epub(txt_source, output_epub, max_sections=None):
     with open(txt_source, 'r', encoding='utf-8') as f:
         full_content = f.read()
 
-    # Split by the separator used in translation_epub.py
     all_chunks = full_content.split('========================================')
     if max_sections:
         all_chunks = all_chunks[:max_sections]
@@ -37,12 +56,14 @@ def create_bilingual_epub(txt_source, output_epub, max_sections=None):
         anchor_id = f"trans_{section_num}"
         
         # 1. CLEAN ARTIFACTS
-        # Strips out our technical notes like "### SECTION 1 ORIGINAL"
         clean_chunk = re.sub(r'### SECTION \d+ (ORIGINAL|METADATA)', '', chunk)
         
-        # 2. TARGETED ANCHOR
-        # Injects the anchor ID into the <details> tag for TOC jumping
-        html_content = re.sub(r'<details', f'<details id="{anchor_id}"', clean_chunk, count=1)
+        # 2. CONVERT DETAILS TO BLOCKQUOTE
+        # We replace the <details> and <summary> tags with our new <div> structure
+        # This is much more compatible with E-readers.
+        html_content = clean_chunk.replace("<details class='modern-translation'>", f"<div id='{anchor_id}' class='translation-block'>")
+        html_content = html_content.replace("<summary>Click to show contemporary translation</summary>", "<span class='translation-label'>Contemporary Translation</span>")
+        html_content = html_content.replace("</details>", "</div>")
         
         # 3. TOC LOGIC
         match = re.search(r'<p>([IVXLCDM\d]+)</p>', chunk)
@@ -60,7 +81,7 @@ def create_bilingual_epub(txt_source, output_epub, max_sections=None):
         chapter = epub.EpubHtml(title=display_title, file_name=file_name, lang='en')
         chapter.add_link(href='style/nav.css', rel='stylesheet', type='text/css')
         
-        # FIX: Simply provide the html_content. ebooklib will wrap it correctly.
+        # ebooklib handles the XHTML wrapping automatically
         chapter.content = html_content
         
         book.add_item(chapter)
@@ -72,7 +93,7 @@ def create_bilingual_epub(txt_source, output_epub, max_sections=None):
     book.spine = ['nav'] + [item for item in book.get_items_of_type(ebooklib.ITEM_DOCUMENT)]
     
     epub.write_epub(output_epub, book, {})
-    print(f"[SUCCESS] EPUB created: {output_epub}")
+    print(f"[SUCCESS] EPUB created with Blockquote style: {output_epub}")
 
 if __name__ == "__main__":
     if len(sys.argv) > 2:
