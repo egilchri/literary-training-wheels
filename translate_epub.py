@@ -21,12 +21,8 @@ def run_interleaved_translation(epub_path, limit=None):
     chunks = []
     for item in book.get_items_of_type(ebooklib.ITEM_DOCUMENT):
         soup = BeautifulSoup(item.get_content(), 'html.parser')
-        
-        # Now searching for headings (h1-h3) as well as paragraphs (p)
         elements = soup.find_all(['h1', 'h2', 'h3', 'p'])
-        
         if elements:
-            # Join all elements found in this XHTML file
             text_block = "\n".join([str(el) for el in elements])
             if len(text_block) > 30:
                 chunks.append(text_block)
@@ -38,46 +34,38 @@ def run_interleaved_translation(epub_path, limit=None):
 
     for i in range(start_section, end_section):
         original_html_chunk = chunks[i]
-        
-        # Detect if this chunk is metadata or an actual chapter start
         is_metadata = "Title" in original_html_chunk or "Author" in original_html_chunk
-        
-        # Strip tags for the AI prompt only
         text_for_ai = BeautifulSoup(original_html_chunk, 'html.parser').get_text()
         
         time.sleep(20) 
         print(f"[*] Section {i+1}: Translating...", end=" ", flush=True)
         
         try:
-            # Instructing the AI to strictly preserve paragraph breaks
             response = client.models.generate_content(
                 model=MODEL_ID,
                 config={'system_instruction': "Translate this literary prose into clear, contemporary English. Maintain the exact same paragraph count and structure. Do not add introductory remarks."},
                 contents=text_for_ai[:12000]
             )
             
-            # Format translation paragraphs
             trans_lines = response.text.strip().split('\n')
             formatted_translation = "".join([f"<p>{l.strip()}</p>" for l in trans_lines if l.strip()])
             
             with open(output_file, "a", encoding="utf-8") as f:
                 f.write(f"\n<div class='original-text justify-text'>\n")
-                
-                # Labeling the section for build_epub.py to find easily
                 if is_metadata:
                     f.write(f"### SECTION {i+1} METADATA\n")
                 else:
                     f.write(f"### SECTION {i+1} ORIGINAL\n")
-                
                 f.write(original_html_chunk + "\n")
                 f.write(f"</div>\n")
                    
-                f.write(f"\n<details class='modern-translation'>\n")
-                f.write(f"  <summary>Click to show contemporary translation</summary>\n")
+                # --- CHANGED: Standard div structure instead of <details> ---
+                f.write(f"\n<div class='translation-block'>\n")
+                f.write(f"  <span class='translation-label'>Contemporary Translation</span>\n")
                 f.write(f"  <div class='translation-content'>\n")
                 f.write(f"    <i>{formatted_translation}</i>\n") 
                 f.write(f"  </div>\n")
-                f.write(f"</details>\n")
+                f.write(f"</div>\n")
                 f.write(f"\n========================================\n")
                 f.flush()
 
