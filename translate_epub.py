@@ -17,23 +17,21 @@ def run_interleaved_translation(epub_path, paragraphs_per_section=3, section_lim
 
     book = epub.read_epub(epub_path)
     
-    # --- 2. TAG-PRESERVED EXTRACTION (REVISED) ---
+    # --- 2. IMPROVED EXTRACTION (INCLUDING HEADERS) ---
     all_paras = []
     for item in book.get_items_of_type(ebooklib.ITEM_DOCUMENT):
         soup = BeautifulSoup(item.get_content(), 'html.parser')
-        # We now look for paragraphs AND headers/divs to catch Roman numeral chapter markers
-        found_elements = soup.find_all(['p', 'h1', 'h2', 'h3', 'div'])
-        
-        # Only include elements that contain actual text content
-        for el in found_elements:
-            if el.get_text().strip():
+        # We now explicitly look for the <h2> tags you mentioned, plus p, h1, and h3
+        # This ensures the Roman numerals "I" and "II" are captured
+        for el in soup.find_all(['p', 'h1', 'h2', 'h3']):
+            if el.get_text(strip=True):
                 all_paras.append(el)
 
     # --- 3. REGROUP INTO SECTIONS ---
     sections = []
     for i in range(0, len(all_paras), paragraphs_per_section):
         chunk = all_paras[i : i + paragraphs_per_section]
-        # Join the actual HTML tags into the block
+        # Join the actual HTML tags into the block to preserve structure
         section_html = "\n".join([str(p) for p in chunk])
         if section_html.strip():
             sections.append(section_html)
@@ -70,7 +68,7 @@ def run_interleaved_translation(epub_path, paragraphs_per_section=3, section_lim
             formatted_translation = "".join([f"<p>{l.strip()}</p>" for l in trans_lines if l.strip()])
             
             with open(output_file, "a", encoding="utf-8") as f:
-                # Write original with preserved tags (p, h1, h2, etc.)
+                # Write original with preserved <p> and <h2> tags
                 f.write(f"\n<div class='original-text justify-text'>\n")
                 f.write(f"### SECTION {i+1} ORIGINAL\n")
                 f.write(original_html_chunk + "\n")
@@ -96,11 +94,7 @@ def run_interleaved_translation(epub_path, paragraphs_per_section=3, section_lim
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Keyword-driven Bilingual Translator")
-    
-    # Required keyword argument for the input file
     parser.add_argument("-i", "--input", required=True, help="Path to the source .epub file")
-    
-    # Optional keyword arguments with defaults
     parser.add_argument("-p", "--paras", type=int, default=3, help="Paragraphs per section (Default: 3)")
     parser.add_argument("-l", "--limit", type=int, default=None, help="Sections to translate (Default: All)")
     
