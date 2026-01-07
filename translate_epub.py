@@ -17,12 +17,17 @@ def run_interleaved_translation(epub_path, paragraphs_per_section=3, section_lim
 
     book = epub.read_epub(epub_path)
     
-    # --- 2. TAG-PRESERVED EXTRACTION ---
+    # --- 2. TAG-PRESERVED EXTRACTION (REVISED) ---
     all_paras = []
     for item in book.get_items_of_type(ebooklib.ITEM_DOCUMENT):
         soup = BeautifulSoup(item.get_content(), 'html.parser')
-        # Preserve the original <p> tags to maintain the 19th-century structure
-        all_paras.extend(soup.find_all('p'))
+        # We now look for paragraphs AND headers/divs to catch Roman numeral chapter markers
+        found_elements = soup.find_all(['p', 'h1', 'h2', 'h3', 'div'])
+        
+        # Only include elements that contain actual text content
+        for el in found_elements:
+            if el.get_text().strip():
+                all_paras.append(el)
 
     # --- 3. REGROUP INTO SECTIONS ---
     sections = []
@@ -65,7 +70,7 @@ def run_interleaved_translation(epub_path, paragraphs_per_section=3, section_lim
             formatted_translation = "".join([f"<p>{l.strip()}</p>" for l in trans_lines if l.strip()])
             
             with open(output_file, "a", encoding="utf-8") as f:
-                # Write original with preserved <p> tags
+                # Write original with preserved tags (p, h1, h2, etc.)
                 f.write(f"\n<div class='original-text justify-text'>\n")
                 f.write(f"### SECTION {i+1} ORIGINAL\n")
                 f.write(original_html_chunk + "\n")
