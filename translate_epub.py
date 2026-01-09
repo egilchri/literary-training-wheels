@@ -9,7 +9,7 @@ MODEL_ID = "gemini-2.0-flash-lite"
 PROGRESS_FILE = ".translation_progress"
 client = genai.Client(api_key=API_KEY)
 
-def run_interleaved_translation(epub_path, paragraphs_per_section=3, section_limit=None):
+def run_interleaved_translation(epub_path, paragraphs_per_section=3, section_limit=None, min_sect_length=None):
     start_section = 0
     if os.path.exists(PROGRESS_FILE):
         with open(PROGRESS_FILE, "r") as f:
@@ -17,50 +17,65 @@ def run_interleaved_translation(epub_path, paragraphs_per_section=3, section_lim
 
     book = epub.read_epub(epub_path)
     
-    # --- 2. TAG-PRESERVED EXTRACTION (INCLUSIVE) ---
+    # --- 2. INCLUSIVE EXTRACTION (Restored) ---
+    # Captures paragraphs and headers (I, II, III) to ensure TOC readiness
     all_paras = []
     for item in book.get_items_of_type(ebooklib.ITEM_DOCUMENT):
         soup = BeautifulSoup(item.get_content(), 'html.parser')
-        # Captures paragraphs and all header levels to ensure Roman numerals are caught
         for el in soup.find_all(['p', 'h1', 'h2', 'h3']):
             if el.get_text(strip=True):
                 all_paras.append(el)
 
-    # --- 3. REGROUP INTO SECTIONS ---
+    # --- 3. REGROUPING LOGIC (Words vs. Paragraphs) ---
     sections = []
-    for i in range(0, len(all_paras), paragraphs_per_section):
-        chunk = all_paras[i : i + paragraphs_per_section]
-        section_html = "\n".join([str(p) for p in chunk])
-        if section_html.strip():
-            sections.append(section_html)
+    if min_sect_length:
+        # Word-based logic: Exceed threshold, then finish current paragraph
+        current_chunk = []
+        current_words = 0
+        for p in all_paras:
+            text = p.get_text()
+            words_in_p = len(text.split())
+            current_chunk.append(p)
+            current_words += words_in_p
+            
+            if current_words >= min_sect_length:
+                sections.append("\n".join([str(x) for x in current_chunk]))
+                current_chunk = []
+                current_words = 0
+        # Final cleanup: handle the remaining "orphan" section at the end of the book
+        if current_chunk:
+            sections.append("\n".join([str(x) for x in current_chunk]))
+    else:
+        # Standard Paragraph-based logic
+        for i in range(0, len(all_paras), paragraphs_per_section):
+            chunk = all_paras[i : i + paragraphs_per_section]
+            section_html = "\n".join([str(p) for p in chunk])
+            if section_html.strip():
+                sections.append(section_html)
 
     output_file = os.path.splitext(epub_path)[0] + "_Bilingual.txt"
-    
     total_sections = len(sections)
-    end_section = total_sections
-    if section_limit:
-        end_section = min(start_section + section_limit, total_sections)
-        print(f"[*] Limit Active: Processing {section_limit} sections.")
+    end_section = min(start_section + section_limit, total_sections) if section_limit else total_sections
 
     print(f"[*] Resuming from Section {start_section + 1} of {total_sections}...")
 
     for i in range(start_section, end_section):
         original_html_chunk = sections[i]
-        text_for_ai = BeautifulSoup(original_html_chunk, 'html.parser').get_text()
+        text_for_ai = BeautifulSoup(original_html_chunk, 'html.parser').get_text().strip()
         
+        if not text_for_ai:
+            continue
+
         time.sleep(20) # Pacing for Gemini Free Tier
         
         print(f"[*] Section {i+1}/{total_sections}: Translating...", end=" ", flush=True)
         try:
-            # --- 4. STRICT SYSTEM INSTRUCTION ---
-            # This updated instruction explicitly forbids any conversational filler or meta-talk
+            # Strict translation prompt to minimize meta-talk
             response = client.models.generate_content(
                 model=MODEL_ID,
                 config={'system_instruction': (
-                    "You are a professional translation engine. Translate the provided text into contemporary English. "
-                    "Output ONLY the translated text. Do not include any introductory remarks, "
-                    "explanations, conversational filler (like 'Okay, I am ready' or 'Here is the translation'), "
-                    "or closing comments. If the input is a title or metadata, translate it directly without comment."
+                    "ACT AS A TRANSLATION ENGINE. Translate the text into contemporary English. "
+                    "OUTPUT ONLY THE TRANSLATION. NO CONVERSATION. NO META-TALK."
                 )},
                 contents=text_for_ai[:12000]
             )
@@ -78,6 +93,7 @@ def run_interleaved_translation(epub_path, paragraphs_per_section=3, section_lim
                 f.write(f"\n<details class='modern-translation'>\n")
                 f.write(f"  <summary>Click to show contemporary translation</summary>\n")
                 f.write(f"  <div class='translation-content'>\n")
+                # Restored: Translation wrapped in italics
                 f.write(f"    <i>{formatted_translation}</i>\n") 
                 f.write(f"  </div>\n")
                 f.write(f"</details>\n")
@@ -93,16 +109,13 @@ def run_interleaved_translation(epub_path, paragraphs_per_section=3, section_lim
             return
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="Clean-Response Bilingual Translator")
-    parser.add_argument("-i", "--input", required=True, help="Path to the source .epub file")
-    parser.add_argument("-p", "--paras", type=int, default=3, help="Paragraphs per section (Default: 3)")
-    parser.add_argument("-l", "--limit", type=int, default=None, help="Sections to translate (Default: All)")
+    parser = argparse.ArgumentParser(description="Bilingual Translator")
+    parser.add_argument("-i", "--input", required=True, help="Path to source .epub")
+    parser.add_argument("-p", "--paras", type=int, default=3, help="Paras per section")
+    parser.add_argument("-l", "--limit", type=int, default=None, help="Limit sections")
+    # Added min_sect_length (measured in words)
+    parser.add_argument("-m", "--min_sect_length", type=int, default=None, help="Min words per section (Supersedes -p)")
     
     args = parser.parse_args()
-    
-    run_interleaved_translation(
-        epub_path=args.input, 
-        paragraphs_per_section=args.paras, 
-        section_limit=args.limit
-    )
+    run_interleaved_translation(args.input, args.paras, args.limit, args.min_sect_length)
     
