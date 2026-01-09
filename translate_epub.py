@@ -3,6 +3,32 @@ from ebooklib import epub
 from bs4 import BeautifulSoup
 from google import genai
 
+# --- CONFIGURATION ---
+API_KEY = os.environ.get("GEMINI_API_KEY")
+MODEL_ID = "gemini-2.0-flash-lite"
+PROGRESS_FILE = ".translation_progress"
+client = genai.Client(api_key=API_KEY)
+
+def run_interleaved_translation(epub_path, paragraphs_per_section=3, section_limit=None, min_sect_length=None):
+    book = epub.read_epub(epub_path)
+    output_file = os.path.splitext(epub_path)[0] + "_Bilingual.txt"
+    
+    # --- NEW: METADATA EXTRACTION ---
+    if not os.path.exists(output_file):
+        title = book.get_metadata('DC', 'title')[0][0] if book.get_metadata('DC', 'title') else "Unknown Title"
+        author = book.get_metadata('DC', 'creator')[0][0] if book.get_metadata('DC', 'creator') else "Unknown Author"
+        identifier = book.get_metadata('DC', 'identifier')[0][0] if book.get_metadata('DC', 'identifier') else "id_123"
+        lang = book.get_metadata('DC', 'language')[0][0] if book.get_metadata('DC', 'language') else "en"
+        
+        with open(output_file, "w", encoding="utf-8") as f:
+            f.write(f"TITLE: {title}\nAUTHOR: {author}\nIDENTIFIER: {identifier}\nLANGUAGE: {lang}\n")
+            f.write("========================================\n")
+
+    # [Previous extraction and translation logic remains the same...]import sys, os, time, ebooklib, argparse
+from ebooklib import epub
+from bs4 import BeautifulSoup
+from google import genai
+
 # --- 1. CONFIGURATION ---
 API_KEY = os.environ.get("GEMINI_API_KEY")
 MODEL_ID = "gemini-2.0-flash-lite"
