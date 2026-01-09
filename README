@@ -28,3 +28,10 @@ python3 ./build_epub.py wings_of_dove_two_Bilingual.txt wings_of_the_dove_two_Bi
 python3 ./translate_epub.py --input retrouve_one.epub --min_sect_length 120  --limit 10
 python3 ./build_epub.py retrouve_one_Bilingual.txt retrouve_one_Bilingual.epub 
 
+
+python3 ./translate_epub.py --input retrouve_one.epub --min_sect_length 120  --limit 10
+python3 ./build_epub.py retrouve_one_Bilingual.txt retrouve_one_Bilingual.epub 
+
+rm .translation_progress
+python3 ./translate_epub.py --input proust_guermantes.epub --min_sect_length 120  --limit 10
+python3 ./build_epub.py proust_guermantes_Bilingual.txt
