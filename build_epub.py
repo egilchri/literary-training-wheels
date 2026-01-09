@@ -3,8 +3,8 @@ from ebooklib import epub
 from bs4 import BeautifulSoup
 
 def clean_text_block(html_content):
-    """Removes technical section markers and long equals-sign strings."""
-    # 1. Remove '### SECTION X ORIGINAL' markers
+    """Removes '### SECTION' headers and long equals-sign strings."""
+    # 1. Remove the '### SECTION X ORIGINAL' markers
     cleaned = re.sub(r'### SECTION \d+ ORIGINAL', '', html_content)
     
     # 2. Remove spurious equals-sign strings (6 or more signs)
@@ -15,8 +15,8 @@ def clean_text_block(html_content):
 def create_bilingual_epub(txt_source, output_epub):
     book = epub.EpubBook()
     
-    # METADATA
-    book.set_identifier('id_wings_dove_final_v4')
+    # 1. METADATA
+    book.set_identifier('id_wings_dove_vol2_final_v5')
     book.set_title('The Wings of the Dove (Bilingual Edition)')
     book.set_language('en')
     book.add_author('Henry James / Gemini AI')
@@ -24,27 +24,23 @@ def create_bilingual_epub(txt_source, output_epub):
     style = '''
         body { font-family: "Georgia", serif; padding: 1.5em; line-height: 1.7; }
         p { text-align: justify !important; margin-bottom: 1.2em; text-indent: 1.5em; }
-        h1 { text-align: center; margin-top: 2em; color: #005a9c; font-size: 1.8em; }
+        h1 { text-align: center; margin-top: 2em; color: #005a9c; }
         .original-text { color: #000000; margin-bottom: 2em; }
         .translation-content { background-color: #f9f9f9; padding: 15px; border-left: 3px solid #005a9c; margin-bottom: 2em; }
         summary { font-weight: bold; cursor: pointer; padding: 10px; background: #f0f4f8; }
-        /* Style for the visible TOC page */
-        nav#toc ol { list-style-type: none; padding-left: 0; }
-        nav#toc li { margin-bottom: 0.5em; }
     '''
     nav_css = epub.EpubItem(uid="style_nav", file_name="style/nav.css", media_type="text/css", content=style)
     book.add_item(nav_css)
 
-    # READ SOURCE
+    # 2. READ SOURCE
     with open(txt_source, 'r', encoding='utf-8') as f:
         full_text = f.read()
 
-    # --- THE CHAPTER SPLITTER ---
+    # --- 3. THE CHAPTER SPLITTER ---
     # Detects Roman Numeral chapters inside <p> or <h2> tags
     chapter_chunks = re.split(r'(<(?:p|h2)>[IVXLCDM]+</(?:p|h2)>)', full_text)
     
-    # 'nav' MUST be the first item in the spine to appear at the beginning
-    spine = ['nav']
+    content_items = []
     toc_links = []
     
     # Process Front Matter (Title Page/Credits)
@@ -53,9 +49,10 @@ def create_bilingual_epub(txt_source, output_epub):
         intro_item = epub.EpubHtml(title='Title Page', file_name='front.xhtml', content=f"<html><body>{intro_raw}</body></html>")
         intro_item.add_link(href='style/nav.css', rel='stylesheet', type='text/css')
         book.add_item(intro_item)
-        spine.append(intro_item)
+        content_items.append(intro_item)
 
-    # UNIQUE CHAPTER GENERATION
+    # 4. UNIQUE CHAPTER GENERATION
+    # Uses 'idx' to prevent duplicate filenames for repeating Roman numerals in Volume 2
     for idx, i in enumerate(range(1, len(chapter_chunks), 2)):
         numeral_text = BeautifulSoup(chapter_chunks[i], 'html.parser').get_text().strip()
         body_clean = clean_text_block(chapter_chunks[i+1])
@@ -68,20 +65,24 @@ def create_bilingual_epub(txt_source, output_epub):
         
         book.add_item(c)
         toc_links.append(epub.Link(file_name, f"Chapter {numeral_text}", f"chap_{idx}"))
-        spine.append(c)
+        content_items.append(c)
 
-    # --- NAVIGATION MANIFEST ---
+    # --- 5. NAVIGATION & SPINE CONFIGURATION ---
+    # Register the links for the sidebar Table of Contents
     book.toc = tuple(toc_links)
     
-    # Create the navigation item and ensure it's registered
+    # Create the internal Navigation Document item
     nav_item = epub.EpubNav()
     book.add_item(nav_item)
-    book.spine = spine
+    
+    # THE FIX: Explicitly set 'nav' as the first item in the spine.
+    # This forces the e-reader to show the TOC at the beginning of the book.
+    book.spine = ['nav'] + content_items
 
     epub.write_epub(output_epub, book, {})
-    print(f"\n[SUCCESS] EPUB created with TOC at the beginning: {output_epub}")
+    print(f"\n[SUCCESS] EPUB created with visible TOC at the start: {output_epub}")
 
 if __name__ == "__main__":
     if len(sys.argv) > 2:
         create_bilingual_epub(sys.argv[1], sys.argv[2])
-
+        
