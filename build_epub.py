@@ -3,11 +3,15 @@ from ebooklib import epub
 from bs4 import BeautifulSoup
 
 def clean_text_block(html_content):
-    """Removes '### SECTION' headers from the text block."""
-    # This specifically targets the '### SECTION X ORIGINAL' markers
+    """Removes technical section markers and long strings of equals signs."""
+    # 1. Remove the '### SECTION X ORIGINAL' markers
     cleaned = re.sub(r'### SECTION \d+ ORIGINAL', '', html_content)
     
-    # Trim leading/trailing whitespace left behind by the removal
+    # 2. Remove spurious equals-sign strings (6 or more signs)
+    # This specifically addresses the '===========' artifact
+    cleaned = re.sub(r'={6,}', '', cleaned)
+    
+    # Trim leading/trailing whitespace left by the removals
     return cleaned.strip()
 
 def create_bilingual_epub(txt_source, output_epub):
@@ -35,13 +39,13 @@ def create_bilingual_epub(txt_source, output_epub):
         full_text = f.read()
 
     # --- 3. THE CHAPTER SPLITTER ---
-    # Split specifically on Roman Numerals inside <p> or <h2> tags
+    # Detects Roman Numeral chapters inside <p> or <h2> tags
     chapter_chunks = re.split(r'(<(?:p|h2)>[IVXLCDM]+</(?:p|h2)>)', full_text)
     
     spine = ['nav']
     toc_links = []
     
-    # Process Front Matter (Credits/Intro)
+    # Handle Front Matter (Intro/Credits)
     if chapter_chunks:
         intro_raw = chapter_chunks[0]
         intro_clean = clean_text_block(intro_raw)
@@ -51,13 +55,13 @@ def create_bilingual_epub(txt_source, output_epub):
         spine.append(intro_item)
 
     # 4. UNIQUE CHAPTER GENERATION
-    # Uses 'idx' to prevent duplicate filenames across different Books in the same volume
+    # Uses index 'idx' to prevent duplicate filenames for repeating chapter numbers (I, II...)
     for idx, i in enumerate(range(1, len(chapter_chunks), 2)):
         numeral_raw = chapter_chunks[i]
         numeral_text = BeautifulSoup(numeral_raw, 'html.parser').get_text().strip()
         body_raw = chapter_chunks[i+1]
         
-        # Clean the chapter body of SECTION markers
+        # Clean the chapter body of SECTION markers and equals-sign strings
         body_clean = clean_text_block(body_raw)
         
         file_name = f'chap_{idx}_{numeral_text}.xhtml'
@@ -70,13 +74,13 @@ def create_bilingual_epub(txt_source, output_epub):
         toc_links.append(epub.Link(file_name, f"Chapter {numeral_text}", f"chap_{idx}"))
         spine.append(c)
 
-    # --- 5. NAVIGATION & AMAZON LANDMARKS ---
+    # --- 5. NAVIGATION ---
     book.toc = tuple(toc_links)
     book.add_item(epub.EpubNav())
     book.spine = spine
 
     epub.write_epub(output_epub, book, {})
-    print(f"\n[SUCCESS] Clean EPUB created (Section markers removed): {output_epub}")
+    print(f"\n[SUCCESS] EPUB created. Section markers and long equals-sign strings removed.")
 
 if __name__ == "__main__":
     if len(sys.argv) > 2:
