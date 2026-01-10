@@ -14,6 +14,8 @@ python3 ./translate_epub.py --input wings_of_dove_one.epub  --limit 2
 python3 ./translate_epub.py --input wings_of_dove_one.epub  --paras 2 --limit 10
 python3 ./translate_epub.py --input wings_of_dove_one.epub  --min_sect_length 120 --limit 10
 
+python3 ./translate_epub.py --input wings_of_dove_one.epub  --num_sentences 2 --limit 40
+
 python3 ./build_epub.py wings_of_dove_one_Bilingual.txt wings_of_the_dove_one_Bilingual.epub 
 
 
@@ -35,3 +37,21 @@ python3 ./build_epub.py retrouve_one_Bilingual.txt retrouve_one_Bilingual.epub
 rm .translation_progress
 python3 ./translate_epub.py --input proust_guermantes.epub --min_sect_length 120  --limit 10
 python3 ./build_epub.py proust_guermantes_Bilingual.txt
+
+
+rm .translation_progress
+python3 ./translate_epub.py --input Proust-01.epub --min_sect_length 120  --limit 10
+python3 ./build_epub.py Proust-01_Bilingual.txt Proust-01.epub
+
+rm .translation_progress Proust-01_Bilingual.txt
+python3 ./translate_epub.py --input Proust-01.epub --num_sentences 2  --limit 100
+python3 ./build_epub.py Proust-01_Bilingual.txt Proust-01.epub
+
+
+python3 ./build_audio.py Proust-01_Bilingual.txt
+
+# where to start from
+# 36 is what section to start with
+python3 ./build_audio.py Proust-01_Bilingual.txt 36
+
+

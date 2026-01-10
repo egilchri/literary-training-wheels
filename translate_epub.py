@@ -1,4 +1,4 @@
-import sys, os, time, ebooklib, argparse
+import sys, os, time, ebooklib, argparse, re
 from ebooklib import epub
 from bs4 import BeautifulSoup
 from google import genai
@@ -9,128 +9,137 @@ MODEL_ID = "gemini-2.0-flash-lite"
 PROGRESS_FILE = ".translation_progress"
 client = genai.Client(api_key=API_KEY)
 
-def run_interleaved_translation(epub_path, paragraphs_per_section=3, section_limit=None, min_sect_length=None):
-    book = epub.read_epub(epub_path)
-    output_file = os.path.splitext(epub_path)[0] + "_Bilingual.txt"
-    
-    # --- NEW: METADATA EXTRACTION ---
-    if not os.path.exists(output_file):
-        title = book.get_metadata('DC', 'title')[0][0] if book.get_metadata('DC', 'title') else "Unknown Title"
-        author = book.get_metadata('DC', 'creator')[0][0] if book.get_metadata('DC', 'creator') else "Unknown Author"
-        identifier = book.get_metadata('DC', 'identifier')[0][0] if book.get_metadata('DC', 'identifier') else "id_123"
-        lang = book.get_metadata('DC', 'language')[0][0] if book.get_metadata('DC', 'language') else "en"
-        
-        with open(output_file, "w", encoding="utf-8") as f:
-            f.write(f"TITLE: {title}\nAUTHOR: {author}\nIDENTIFIER: {identifier}\nLANGUAGE: {lang}\n")
-            f.write("========================================\n")
-
-    # [Previous extraction and translation logic remains the same...]import sys, os, time, ebooklib, argparse
-from ebooklib import epub
-from bs4 import BeautifulSoup
-from google import genai
-
-# --- 1. CONFIGURATION ---
-API_KEY = os.environ.get("GEMINI_API_KEY")
-MODEL_ID = "gemini-2.0-flash-lite"
-PROGRESS_FILE = ".translation_progress"
-client = genai.Client(api_key=API_KEY)
-
 def clean_ai_response(text):
-    """Ensures AI meta-talk like 'Enough thinking' is stripped at the source."""
-    artifacts = ["Enough thinking", "Okay, I'm ready", "Here is the translation"]
+    """Deletes common AI conversational artifacts."""
+    artifacts = [
+        "Here's my attempt", "Here is the translation", "Translation:", 
+        "Contemporary English:", "Certainly!", "Okay", "Enough thinking"
+    ]
     cleaned = text.strip()
     for artifact in artifacts:
-        cleaned = cleaned.replace(artifact, "")
+        # Case-insensitive removal of common introductory phrases
+        cleaned = re.sub(f"(?i)^{artifact}.*?[:\\n]", "", cleaned)
     return cleaned.strip()
 
-def run_interleaved_translation(epub_path, paragraphs_per_section=3, section_limit=None, min_sect_length=None):
+def split_into_sentences(text):
+    """Splits text into sentences based on punctuation."""
+    sentences = re.split(r'(?<=[.!?])\s+', text.strip())
+    return [s for s in sentences if s.strip()]
+
+def is_narrative_start(el):
+    """Triggers translation at the first 15-word paragraph (e.g., 'Longtemps')."""
+    text = el.get_text().strip()
+    return el.name == 'p' and len(text.split()) >= 15
+
+def run_interleaved_translation(epub_path, section_limit=None, min_sect_length=500, num_sentences=None):
     start_section = 0
     if os.path.exists(PROGRESS_FILE):
         with open(PROGRESS_FILE, "r") as f:
-            start_section = int(f.read().strip())
+            line = f.read().strip()
+            start_section = int(line) if line.isdigit() else 0
 
     book = epub.read_epub(epub_path)
+    output_file = os.path.splitext(epub_path)[0] + "_Bilingual.txt"
     
-    # --- 2. VERBATIM EXTRACTION ---
-    all_paras = []
+    # 1. METADATA HANDSHAKE
+    if not os.path.exists(output_file):
+        title = book.get_metadata('DC', 'title')[0][0] if book.get_metadata('DC', 'title') else "Unknown"
+        author = book.get_metadata('DC', 'creator')[0][0] if book.get_metadata('DC', 'creator') else "Unknown"
+        with open(output_file, "w", encoding="utf-8") as f:
+            f.write(f"TITLE: {title}\nAUTHOR: {author}\n========================================\n")
+
+    all_elements = []
     for item in book.get_items_of_type(ebooklib.ITEM_DOCUMENT):
         soup = BeautifulSoup(item.get_content(), 'html.parser')
-        # Captures p and h tags to ensure the TOC headers are preserved
         for el in soup.find_all(['p', 'h1', 'h2', 'h3']):
             if el.get_text(strip=True):
-                all_paras.append(el)
+                all_elements.append(el)
 
-    # --- 3. REGROUPING BY WORD COUNT ---
-    sections = []
-    if min_sect_length:
-        current_chunk, current_words = [], 0
-        for p in all_paras:
-            current_chunk.append(p)
-            current_words += len(p.get_text().split())
-            if current_words >= min_sect_length:
-                sections.append("\n".join([str(x) for x in current_chunk]))
-                current_chunk, current_words = [], 0
-        if current_chunk: # Final section cleanup
-            sections.append("\n".join([str(x) for x in current_chunk]))
-    else:
-        for i in range(0, len(all_paras), paragraphs_per_section):
-            chunk = all_paras[i : i + paragraphs_per_section]
-            sections.append("\n".join([str(p) for p in chunk]))
+    # 2. SEGMENTATION ENGINE
+    sections, narrative_found, sentence_buffer, chunk_buffer, words_in_chunk = [], False, [], [], 0
 
-    output_file = os.path.splitext(epub_path)[0] + "_Bilingual.txt"
-    total_sections = len(sections)
-    end_section = min(start_section + section_limit, total_sections) if section_limit else total_sections
+    for el in all_elements:
+        if not narrative_found and is_narrative_start(el):
+            narrative_found = True
 
-    print(f"[*] Processing Sections {start_section+1} to {end_section} of {total_sections}...")
+        if not narrative_found:
+            sections.append((False, str(el)))
+        else:
+            text = el.get_text().strip()
+            if num_sentences:
+                sentences = split_into_sentences(text)
+                for s in sentences:
+                    sentence_buffer.append(s)
+                    if len(sentence_buffer) >= num_sentences:
+                        sections.append((True, " ".join(sentence_buffer)))
+                        sentence_buffer = []
+            else:
+                chunk_buffer.append(el)
+                words_in_chunk += len(text.split())
+                if words_in_chunk >= min_sect_length:
+                    sections.append((True, "\n".join([str(x) for x in chunk_buffer])))
+                    chunk_buffer, words_in_chunk = [], 0
 
-    for i in range(start_section, end_section):
-        original_html_chunk = sections[i]
-        text_for_ai = BeautifulSoup(original_html_chunk, 'html.parser').get_text().strip()
-        if not text_for_ai: continue
+    if sentence_buffer: sections.append((True, " ".join(sentence_buffer)))
+    if chunk_buffer: sections.append((True, "\n".join([str(x) for x in chunk_buffer])))
 
-        time.sleep(20) # Pacing
-        print(f"[*] Section {i+1}/{total_sections}: Translating...", end=" ", flush=True)
-        try:
-            # --- 4. REINFORCED SYSTEM INSTRUCTION ---
-            response = client.models.generate_content(
-                model=MODEL_ID,
-                config={'system_instruction': (
-                    "ACT AS AN ENGLISH LITERARY TRANSLATOR. "
-                    "Rewrite 1902 Henry James prose into contemporary English. "
-                    "OUTPUT ONLY ENGLISH TRANSLATED PROSE. NO GREEK. NO SPANISH. "
-                    "NO CONVERSATION. NO META-TALK."
-                )},
-                contents=text_for_ai[:12000]
-            )
+    # 3. TRANSLATION WITH CONTEXT
+    total = len(sections)
+    translated_count = 0
+    last_translation = "No previous context."
+    idx = start_section
+
+    print(f"[*] Resuming at section {idx+1}/{total}. Filter Active.")
+
+    while idx < total:
+        do_trans, content = sections[idx]
+        with open(output_file, "a", encoding="utf-8") as f:
+            display_original = f"<p>{content}</p>" if (do_trans and num_sentences) else content
+            f.write(f"\n<div class='original-text'>\n### SECTION {idx+1} ORIGINAL\n{display_original}\n</div>\n")
             
-            sanitized = clean_ai_response(response.text if response.text else "")
-            # Properly nested italics for e-reader compatibility
-            formatted = "".join([f"<p><i>{l.strip()}</i></p>" for l in sanitized.split('\n') if l.strip()])
-            
-            with open(output_file, "a", encoding="utf-8") as f:
-                f.write(f"\n<div class='original-text justify-text'>\n")
-                f.write(f"### SECTION {i+1} ORIGINAL\n")
-                f.write(original_html_chunk + "\n") # VERBATIM ORIGINAL
-                f.write(f"</div>\n")
-                   
-                f.write(f"\n<details class='modern-translation'>\n")
-                f.write(f"  <summary>Click to show contemporary translation</summary>\n")
-                f.write(f"  <div class='translation-content'>\n{formatted}\n</div>\n")
-                f.write(f"</details>\n========================================\n")
-                f.flush()
+            if do_trans:
+                print(f"[*] Translating Segment {translated_count+1}...", end=" ", flush=True)
+                time.sleep(15)
+                clean_text = content if num_sentences else BeautifulSoup(content, 'html.parser').get_text().strip()
+                
+                # Including Last Translation for continuity
+                prompt = f"PREVIOUS TRANSLATION CONTEXT: {last_translation}\n\nCURRENT TEXT TO TRANSLATE:\n{clean_text}"
+                
+                try:
+                    res = client.models.generate_content(
+                        model=MODEL_ID,
+                        config={'system_instruction': "ACT AS A LITERARY TRANSLATOR. NO CONVERSATION. NO INTRODUCTIONS. OUTPUT ONLY CONTEMPORARY ENGLISH PROSE."},
+                        contents=prompt[:12000]
+                    )
+                    sanitized = clean_ai_response(res.text)
+                    last_translation = sanitized # Update context carryover
+                    
+                    # --- INSERT THE LINE HERE ---
+                    sanitized = res.text.replace("Here's my attempt at translating the French passage into contemporary English:", "").strip()
+                    # ----------------------------
 
-            with open(PROGRESS_FILE, "w") as f: f.write(str(i+1))
-            print("Done.")
-        except Exception as e:
-            print(f"Error: {e}")
-            return
+                    last_translation = sanitized
+                    fmt = "".join([f"<p><i>{line.strip()}</i></p>" for line in sanitized.split('\n') if line.strip()])
+
+
+                    f.write(f"\n<details><summary>Translation</summary>\n<div class='translation-content'>{fmt}</div>\n</details>\n")
+                    translated_count += 1
+                    print("Done.")
+                except Exception as e:
+                    print(f"Error: {e}")
+
+            f.write(f"\n========================================\n")
+            f.flush()
+        idx += 1
+        with open(PROGRESS_FILE, "w") as f: f.write(str(idx))
+        if section_limit and translated_count >= section_limit: break
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("-i", "--input", required=True)
-    parser.add_argument("-p", "--paras", type=int, default=3)
     parser.add_argument("-l", "--limit", type=int, default=None)
-    parser.add_argument("-m", "--min_sect_length", type=int, default=None)
+    parser.add_argument("-m", "--min_sect_length", type=int, default=500)
+    parser.add_argument("-s", "--num_sentences", type=int, default=None)
     args = parser.parse_args()
-    run_interleaved_translation(args.input, args.paras, args.limit, args.min_sect_length)
+    run_interleaved_translation(args.input, args.limit, args.min_sect_length, args.num_sentences)
 

@@ -1,41 +1,58 @@
 import os, sys, re, ebooklib
 from ebooklib import epub
+from bs4 import BeautifulSoup
 
-def create_bilingual_epub(txt_source, output_epub=None):
-    # Default output name if none provided
-    if not output_epub:
-        output_epub = os.path.splitext(txt_source)[0].replace("_Bilingual", "") + "_Final.epub"
+def interrogate_source(epub_path):
+    """Pulls original Title/Author to automate the build."""
+    source = epub.read_epub(epub_path)
+    return {
+        'id': source.get_metadata('DC', 'identifier')[0][0] if source.get_metadata('DC', 'identifier') else 'id_123',
+        'title': source.get_metadata('DC', 'title')[0][0] if source.get_metadata('DC', 'title') else 'Unknown',
+        'author': source.get_metadata('DC', 'creator')[0][0] if source.get_metadata('DC', 'creator') else 'Unknown',
+        'lang': source.get_metadata('DC', 'language')[0][0] if source.get_metadata('DC', 'language') else 'en'
+    }
+
+def create_bilingual_epub(txt_source, original_epub):
+    meta = interrogate_source(original_epub)
+    output_epub = os.path.splitext(txt_source)[0] + ".epub"
+    book = epub.EpubBook()
+    book.set_identifier(meta['id'])
+    book.set_title(f"{meta['title']} (Bilingual)")
+    book.set_language(meta['lang'])
+    book.add_author(f"{meta['author']} / Gemini AI")
+
+    # CSS for high-quality typography
+    style = 'body { font-family: "Georgia", serif; padding: 2em; line-height: 1.8; } .original-text { margin-bottom: 1.5em; text-align: justify; } .translation-content i { color: #333; line-height: 1.6; } h1, h2, h3 { text-align: center; color: #005a9c; margin-top: 1.5em; }'
+    book.add_item(epub.EpubItem(uid="style", file_name="style/nav.css", media_type="text/css", content=style))
 
     with open(txt_source, 'r', encoding='utf-8') as f:
-        full_content = f.read()
+        chunks = f.read().split('========================================')
 
-    all_chunks = full_content.split('========================================')
-    
-    # --- NEW: INTERROGATE METADATA FROM TEXT FILE ---
-    meta_chunk = all_chunks[0]
-    meta_data = {}
-    for line in meta_chunk.split('\n'):
-        if ':' in line:
-            key, val = line.split(':', 1)
-            meta_data[key.strip()] = val.strip()
+    toc_links = []
+    for idx, chunk in enumerate(chunks):
+        if not chunk.strip() or "TITLE:" in chunk: continue
+        file_name = f'section_{idx}.xhtml'
+        clean = re.sub(r'### SECTION \d+ ORIGINAL', '', chunk).strip()
+        
+        # TOC LOGIC: Captures hierarchical headers like Combray and I
+        soup = BeautifulSoup(chunk, 'html.parser')
+        for h in soup.find_all(['h1', 'h2', 'h3']):
+            txt = h.get_text().strip()
+            if len(txt) < 60 and (re.match(r'^[IVXLCDM\d\.\s]+$', txt) or re.search(r'PART|BOOK|CHAPTER|COMBRAY', txt, re.IGNORECASE)):
+                toc_links.append(epub.Link(file_name, txt, f"toc_{idx}_{h.name}"))
 
-    book = epub.EpubBook()
-    book.set_identifier(meta_data.get('IDENTIFIER', 'id123'))
-    book.set_title(f"{meta_data.get('TITLE', 'Unknown')} (Bilingual Edition)")
-    book.set_language(meta_data.get('LANGUAGE', 'en'))
-    book.add_author(f"{meta_data.get('AUTHOR', 'Unknown')} / Gemini AI")
+        item = epub.EpubHtml(title="Section", file_name=file_name)
+        item.add_link(href='style/nav.css', rel='stylesheet', type='text/css')
+        item.content = f'<html><body>{clean}</body></html>'
+        book.add_item(item)
 
-    # [Rest of your hierarchical TOC and CSS logic follows...]
-    
-    # Add NCX and NAV for epubcheck compliance
+    book.toc = tuple(toc_links)
     book.add_item(epub.EpubNcx())
     book.add_item(epub.EpubNav())
-    
     book.spine = ['nav'] + [item for item in book.get_items_of_type(ebooklib.ITEM_DOCUMENT)]
     epub.write_epub(output_epub, book, {})
-    print(f"[SUCCESS] Generalised EPUB created: {output_epub}")
+    print(f"[SUCCESS] Built: {output_epub}")
 
 if __name__ == "__main__":
-    if len(sys.argv) >= 2:
-        create_bilingual_epub(sys.argv[1], sys.argv[2] if len(sys.argv) > 2 else None)
+    create_bilingual_epub(sys.argv[1], sys.argv[2])
 
