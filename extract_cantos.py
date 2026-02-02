@@ -122,7 +122,7 @@ def process_cantos(file_path, start_canto, end_canto):
             print(f"NARRATIVE SUMMARY: {name} {sec_range}")
             print(f"{'-'*70}")
             
-            print(summarize_with_gemini(data['text'], name))
+            # print(summarize_with_gemini(data['text'], name))
             
             if name == end_canto: break
 

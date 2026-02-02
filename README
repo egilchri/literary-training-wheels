@@ -1,10 +1,8 @@
-rm .translation_progress TurnOfTheScrew_Bilingual.txt
+rm .translation_progress Books/TurnOfTheScrew_Bilingual.txt
 
+python3 ./translate_epub.py --input Books/TurnOfTheScrew.epub  --min_sect_length 120 --limit 10
+python3 ./build_epub.py Books/TurnOfTheScrew_Bilingual.txt Books/TurnOfTheScrew.epub
 
-python3 ./translate_epub.py --input TurnOfTheScrew.epub --paras 2
-python3 ./translate_epub.py --input TurnOfTheScrew.epub  --paras 2 --limit 10
-python3 ./translate_epub.py --input TurnOfTheScrew.epub  --min_sect_length 120 --limit 10
-python3 ./build_epub.py TurnOfTheScrew_Bilingual.txt TurnOfTheScrew_Bilingual.epub
 
 
 rm .translation_progress wings_of_dove_one_Bilingual.txt
@@ -52,6 +50,89 @@ python3 ./build_audio.py Proust-01_Bilingual.txt
 
 # where to start from
 # 36 is what section to start with
-python3 ./build_audio.py Proust-01_Bilingual.txt 36
+python3 ./build_audio.py Proust-01_Bilingual.txt -start 36 -spped .75
+
+
+
+rm .translation_progress Books/divine_comedy_Bilingual.txt
+python3 ./translate_epub.py --input Books/divine_comedy.epub --num_sentences 2  
+caffeinate python3 ./translate_epub.py --input Books/divine_comedy.epub --num_sentences 2  
+python3 ./build_epub.py Books/divine_comedy_Bilingual.txt Books/divine_comedy.epub
+caffeinate python3 ./build_audio.py Books/divine_comedy_Bilingual.txt -start 10 -speed .75 -lang italian 2>/dev/null
+
+
+rm .translation_progress Book/DonQuijote_Bilingual.txt
+python3 ./translate_epub.py --input Books/DonQuijote.epub --num_sentences 2 
+python3 ./build_epub.py Books/DonQuijote_Bilingual.txt Books/DonQuijote.epub
+python3 ./build_audio.py Books/DonQuijote_Bilingual.txt  -speed .75 -start 95 -lang spanish
+
+
+rm .translation_progress ParadiseLost_Bilingual.txt
+python3 ./translate_epub.py --input Books/ParadiseLost.epub --num_sentences 2  --limit 100
+python3 ./build_epub.py ParadiseLost_Bilingual.txt ParadiseLost.epub
+python3 ./build_audio.py Books/ParadiseLost_Bilingual.txt -start 10 -speed .75
+
+
+
+rm .translation_progress Catalina_Bilingual.txt
+python3 ./translate_epub.py --input Books/Catalina.epub --num_sentences 2  --limit 100
+python3 ./build_epub.py Books/Catalina_Bilingual.txt Books/Catalina.epub
+python3 ./build_audio.py Books/Catalina_Bilingual.txt  -speed .75 -start 95 -lang spanish
+
+
+
+rm .translation_progress geoffrey-chaucer_the-canterbury-tales_Bilingual.txt
+python3 ./translate_epub.py --input Books/geoffrey-chaucer_the-canterbury-tales.epub --num_sentences 2  --limit 200
+python3 ./build_epub.py Books/geoffrey-chaucer_the-canterbury-tales_Bilingual.txt Books/geoffrey-chaucer_the-canterbury-tales.epub
+python3 ./build_audio.py Books/geoffrey-chaucer_the-canterbury-tales_Bilingual.txt  -speed .75 -start 95 -lang english
+
+
+python3 ./extract_cantos.py -input Books/divine_comedy_Bilingual.txt -start_canto 'Inferno * Canto I' -end_canto 'Inferno * Canto V'
+
+
+python3 ./reformat_cantos.py -html_file Books/forGit/divine_comedy_Bilingual_Part_9_from_801_italian_speed_0.75.html -canto_data Books/divine_comedy_inferno_summaries.txt
+
+
+python3 ./extract_cantos.py -input Books/divine_comedy_Bilingual.txt -start_canto 'Purgatorio • Canto XXIV' -end_canto 'Purgatorio • Canto XXXIII'
+
+python3 ./extract_cantos.py -input Books/divine_comedy_Bilingual.txt -start_canto 'Paradiso • Canto I' -end_canto 'Paradiso • Canto XXXIII'
+
+
+python3 ./reformat_cantos.py -html_file Books/forGit/divine_comedy_Bilingual_Part_9_from_801_italian_speed_0.75.html -canto_data Books/divine_comedy_all_summaries.txt
+
+
+caffeinate python3 ./build_audio.py Books/divine_comedy_Bilingual.txt -start 10 -speed .75 -lang italian -summary_file Books/divine_comedy_all_summaries.txt 2>/dev/null
+
+
+
+rm .translation_progress Books/divine_comedy_Bilingual.txt
+caffeinate python3 ./translate_epub.py --input Books/divine_comedy.epub --break_at_p_tags
+
+python3 ./build_epub.py Books/divine_comedy_Bilingual.txt Books/divine_comedy.epub
+caffeinate python3 ./extract_cantos.py -input Books/divine_comedy_Bilingual_aug.txt -start_canto 'Inferno * Canto I' -end_canto 'Paradiso • Canto XXXIII'
+
+
+python3 ./rehabilitate_summaries.py
+
+
+caffeinate python3 ./build_audio.py Books/divine_comedy_Bilingual.txt -start 10 -speed .75 -lang italian 2>/dev/null
+
+python3 ./extract_cantos.py -input Books/divine_comedy_Bilingual.txt -start_canto 'Inferno * Canto I' -end_canto 'Inferno * Canto V'
+
+caffeinate python3 ./build_audio.py Books/divine_comedy_Bilingual_aug.txt -start 10 -speed .75 -lang italian -summary_file Books/divine_comedy_all_summaries_new_rehabilitated.txt 2>/dev/null
+
+python3 ./build_audio.py Books/divine_comedy_Bilingual_aug.txt -start 10 -speed .75 -lang italian -summary_file Books/divine_comedy_all_summaries_new_rehabilitated.txt -num_cantos 1
+
+
+python3 ./augment_bilingual_text.py
+
+
+
+
+
+
+
+
+
 
 

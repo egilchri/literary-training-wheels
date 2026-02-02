@@ -31,7 +31,7 @@ def is_narrative_start(el):
     text = el.get_text().strip()
     return el.name == 'p' and len(text.split()) >= 15
 
-def run_interleaved_translation(epub_path, section_limit=None, min_sect_length=500, num_sentences=None):
+def run_interleaved_translation(epub_path, section_limit=None, min_sect_length=500, num_sentences=None, break_at_p_tags=False):
     start_section = 0
     if os.path.exists(PROGRESS_FILE):
         with open(PROGRESS_FILE, "r") as f:
@@ -66,7 +66,10 @@ def run_interleaved_translation(epub_path, section_limit=None, min_sect_length=5
             sections.append((False, str(el)))
         else:
             text = el.get_text().strip()
-            if num_sentences:
+            # NEW: Immediate break if parameter is active
+            if break_at_p_tags and el.name == 'p':
+                sections.append((True, str(el)))
+            elif num_sentences:
                 sentences = split_into_sentences(text)
                 for s in sentences:
                     sentence_buffer.append(s)
@@ -112,15 +115,9 @@ def run_interleaved_translation(epub_path, section_limit=None, min_sect_length=5
                         contents=prompt[:12000]
                     )
                     sanitized = clean_ai_response(res.text)
-                    last_translation = sanitized # Update context carryover
+                    last_translation = sanitized 
                     
-                    # --- INSERT THE LINE HERE ---
-                    sanitized = res.text.replace("Here's my attempt at translating the French passage into contemporary English:", "").strip()
-                    # ----------------------------
-
-                    last_translation = sanitized
                     fmt = "".join([f"<p><i>{line.strip()}</i></p>" for line in sanitized.split('\n') if line.strip()])
-
 
                     f.write(f"\n<details><summary>Translation</summary>\n<div class='translation-content'>{fmt}</div>\n</details>\n")
                     translated_count += 1
@@ -140,6 +137,8 @@ if __name__ == "__main__":
     parser.add_argument("-l", "--limit", type=int, default=None)
     parser.add_argument("-m", "--min_sect_length", type=int, default=500)
     parser.add_argument("-s", "--num_sentences", type=int, default=None)
+    # ADDED PARAMETER
+    parser.add_argument("-break_at_p_tags", action="store_true", help="Interleave based on paragraph boundaries")
     args = parser.parse_args()
-    run_interleaved_translation(args.input, args.limit, args.min_sect_length, args.num_sentences)
+    run_interleaved_translation(args.input, args.limit, args.min_sect_length, args.num_sentences, args.break_at_p_tags)
 
