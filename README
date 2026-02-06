@@ -128,11 +128,14 @@ python3 ./augment_bilingual_text.py
 
 
 
+# rm .translation_progress Books/what_maisie_knew_Bilingual.txt
+# do 2 paragraphs before interleave 5 sections 
+# python3 ./translate_epub.py --input Books/what_maisie_knew.epub  --limit 2
+python3 ./translate_epub.py --input Books/what_maisie_knew.epub  --num_sentences 4
+
+python3 ./build_epub.py Books/what_maisie_knew_Bilingual.txt Books/what_maisie_knew.epub
+
+caffeinate python3 extract_chapters.py -start_chapter "Chapter I" -end_chapter "Chapter VI"
 
 
-
-
-
-
-
-
+caffeinate  python3 ./build_epub.py --input Books/what_maisie_knew_Bilingual.txt --output Books/what_maisie_knew_Bilingual.epub --summary_file what_maisie_knew_Bilingual.out

@@ -17,7 +17,6 @@ def clean_ai_response(text):
     ]
     cleaned = text.strip()
     for artifact in artifacts:
-        # Case-insensitive removal of common introductory phrases
         cleaned = re.sub(f"(?i)^{artifact}.*?[:\\n]", "", cleaned)
     return cleaned.strip()
 
@@ -27,11 +26,14 @@ def split_into_sentences(text):
     return [s for s in sentences if s.strip()]
 
 def is_narrative_start(el):
-    """Triggers translation at the first 15-word paragraph (e.g., 'Longtemps')."""
+    """Triggers translation at the first 15-word paragraph."""
     text = el.get_text().strip()
     return el.name == 'p' and len(text.split()) >= 15
 
-def run_interleaved_translation(epub_path, section_limit=None, min_sect_length=500, num_sentences=None, break_at_p_tags=False):
+def run_interleaved_translation(epub_path, section_limit=None, min_sect_length=500, num_sentences=None, break_at_p_tags=False, chapter_tags=None):
+    if chapter_tags is None:
+        chapter_tags = ['h1', 'h2', 'h3']
+
     start_section = 0
     if os.path.exists(PROGRESS_FILE):
         with open(PROGRESS_FILE, "r") as f:
@@ -41,7 +43,6 @@ def run_interleaved_translation(epub_path, section_limit=None, min_sect_length=5
     book = epub.read_epub(epub_path)
     output_file = os.path.splitext(epub_path)[0] + "_Bilingual.txt"
     
-    # 1. METADATA HANDSHAKE
     if not os.path.exists(output_file):
         title = book.get_metadata('DC', 'title')[0][0] if book.get_metadata('DC', 'title') else "Unknown"
         author = book.get_metadata('DC', 'creator')[0][0] if book.get_metadata('DC', 'creator') else "Unknown"
@@ -51,61 +52,72 @@ def run_interleaved_translation(epub_path, section_limit=None, min_sect_length=5
     all_elements = []
     for item in book.get_items_of_type(ebooklib.ITEM_DOCUMENT):
         soup = BeautifulSoup(item.get_content(), 'html.parser')
-        for el in soup.find_all(['p', 'h1', 'h2', 'h3']):
+        for el in soup.find_all(['p', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6']):
             if el.get_text(strip=True):
                 all_elements.append(el)
 
-    # 2. SEGMENTATION ENGINE
+    # SEGMENTATION ENGINE
     sections, narrative_found, sentence_buffer, chunk_buffer, words_in_chunk = [], False, [], [], 0
 
     for el in all_elements:
+        is_header = el.name.lower() in chapter_tags
+        
+        if is_header and sentence_buffer:
+            sections.append((True, " ".join(sentence_buffer), False))
+            sentence_buffer = []
+
         if not narrative_found and is_narrative_start(el):
             narrative_found = True
 
         if not narrative_found:
-            sections.append((False, str(el)))
+            sections.append((False, str(el), False))
+        elif is_header:
+            sections.append((True, el.get_text().strip(), True))
         else:
             text = el.get_text().strip()
-            # NEW: Immediate break if parameter is active
             if break_at_p_tags and el.name == 'p':
-                sections.append((True, str(el)))
+                sections.append((True, str(el), False))
             elif num_sentences:
                 sentences = split_into_sentences(text)
                 for s in sentences:
                     sentence_buffer.append(s)
                     if len(sentence_buffer) >= num_sentences:
-                        sections.append((True, " ".join(sentence_buffer)))
+                        sections.append((True, " ".join(sentence_buffer), False))
                         sentence_buffer = []
             else:
                 chunk_buffer.append(el)
                 words_in_chunk += len(text.split())
                 if words_in_chunk >= min_sect_length:
-                    sections.append((True, "\n".join([str(x) for x in chunk_buffer])))
+                    sections.append((True, "\n".join([str(x) for x in chunk_buffer]), False))
                     chunk_buffer, words_in_chunk = [], 0
 
-    if sentence_buffer: sections.append((True, " ".join(sentence_buffer)))
-    if chunk_buffer: sections.append((True, "\n".join([str(x) for x in chunk_buffer])))
+    if sentence_buffer: sections.append((True, " ".join(sentence_buffer), False))
+    if chunk_buffer: sections.append((True, "\n".join([str(x) for x in chunk_buffer]), False))
 
-    # 3. TRANSLATION WITH CONTEXT
     total = len(sections)
     translated_count = 0
     last_translation = "No previous context."
     idx = start_section
 
-    print(f"[*] Resuming at section {idx+1}/{total}. Filter Active.")
+    print(f"[*] Resuming at section {idx+1}/{total}. Chapter Tags: {chapter_tags}")
 
     while idx < total:
-        do_trans, content = sections[idx]
+        do_trans, content, is_header = sections[idx]
         with open(output_file, "a", encoding="utf-8") as f:
-            display_original = f"<p>{content}</p>" if (do_trans and num_sentences) else content
-            f.write(f"\n<div class='original-text'>\n### SECTION {idx+1} ORIGINAL\n{display_original}\n</div>\n")
+            
+            if is_header:
+                # Chapter Boundary Markup
+                f.write(f"\n\n{'#'*40}\n>>> CHAPTER BOUNDARY <<<\n{'#'*40}\n")
+                f.write(f"## ORIGINAL CHAPTER: {content}\n")
+            else:
+                display_original = f"<p>{content}</p>" if (do_trans and num_sentences) else content
+                f.write(f"\n<div class='original-text'>\n### SECTION {idx+1} ORIGINAL\n{display_original}\n</div>\n")
             
             if do_trans:
-                print(f"[*] Translating Segment {translated_count+1}...", end=" ", flush=True)
+                print(f"[*] Translating {'Chapter' if is_header else 'Segment'} {translated_count+1}...", end=" ", flush=True)
                 time.sleep(15)
-                clean_text = content if num_sentences else BeautifulSoup(content, 'html.parser').get_text().strip()
                 
-                # Including Last Translation for continuity
+                clean_text = content if (num_sentences or is_header) else BeautifulSoup(content, 'html.parser').get_text().strip()
                 prompt = f"PREVIOUS TRANSLATION CONTEXT: {last_translation}\n\nCURRENT TEXT TO TRANSLATE:\n{clean_text}"
                 
                 try:
@@ -117,9 +129,13 @@ def run_interleaved_translation(epub_path, section_limit=None, min_sect_length=5
                     sanitized = clean_ai_response(res.text)
                     last_translation = sanitized 
                     
-                    fmt = "".join([f"<p><i>{line.strip()}</i></p>" for line in sanitized.split('\n') if line.strip()])
-
-                    f.write(f"\n<details><summary>Translation</summary>\n<div class='translation-content'>{fmt}</div>\n</details>\n")
+                    if is_header:
+                        f.write(f"## TRANSLATED CHAPTER: {sanitized}\n")
+                        f.write(f"{'#'*40}\n\n")
+                    else:
+                        fmt = "".join([f"<p><i>{line.strip()}</i></p>" for line in sanitized.split('\n') if line.strip()])
+                        f.write(f"\n<details><summary>Translation</summary>\n<div class='translation-content'>{fmt}</div>\n</details>\n")
+                    
                     translated_count += 1
                     print("Done.")
                 except Exception as e:
@@ -137,8 +153,11 @@ if __name__ == "__main__":
     parser.add_argument("-l", "--limit", type=int, default=None)
     parser.add_argument("-m", "--min_sect_length", type=int, default=500)
     parser.add_argument("-s", "--num_sentences", type=int, default=None)
-    # ADDED PARAMETER
-    parser.add_argument("-break_at_p_tags", action="store_true", help="Interleave based on paragraph boundaries")
+    parser.add_argument("-break_at_p_tags", action="store_true")
+    parser.add_argument("-chapter_tags", type=str, default="h1,h2,h3")
+    
     args = parser.parse_args()
-    run_interleaved_translation(args.input, args.limit, args.min_sect_length, args.num_sentences, args.break_at_p_tags)
+    tags_list = [t.strip().lower() for t in args.chapter_tags.split(',')]
+    
+    run_interleaved_translation(args.input, args.limit, args.min_sect_length, args.num_sentences, args.break_at_p_tags, tags_list)
 
