@@ -146,3 +146,14 @@ caffeinate  python3 ./build_epub.py --input Books/what_maisie_knew_Bilingual.txt
 caffeinate python3 ./build_epub.py --input Books/what_maisie_knew_Bilingual.txt --output Books/what_maisie_knew_Bilingual.epub --summary_file Books/what_maisie_knew_Bilingual.out.txt
 
 caffeinate  python3 build_chapter_audio.py -i Books/what_maisie_knew_Bilingual.txt -o Books/AudioOutput
+
+
+📖 Read the Book
+You can download the latest bilingual edition of What Maisie Knew below. This EPUB includes the original English text alongside the translation, complete with action-focused chapter summaries.
+
+How to use this file:
+Desktop: Use Calibre or Apple Books.
+
+Mobile: Send the file to your iPhone (Books app) or Android (Google Play Books).
+
+Kindle: Send the .epub file to your Kindle email address; Amazon will automatically convert it for your device.
