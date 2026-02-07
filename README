@@ -135,7 +135,14 @@ python3 ./translate_epub.py --input Books/what_maisie_knew.epub  --num_sentences
 
 python3 ./build_epub.py Books/what_maisie_knew_Bilingual.txt Books/what_maisie_knew.epub
 
-caffeinate python3 extract_chapters.py -start_chapter "Chapter I" -end_chapter "Chapter VI"
+caffeinate python3 extract_chapters.py -i Books/what_maisie_knew_Bilingual.txt -start_chapter "Introduction" -end_chapter "Chapter XXXI" -o Books/what_maisie_knew_Bilingual.out.txt
+
+# just summarize the Introduction
+# python extract_chapters.py -i what_maisie_knew_Bilingual.txt -o Extracted_Chapters
+
+caffeinate  python3 ./build_epub.py --input Books/what_maisie_knew_Bilingual.txt --output Books/what_maisie_knew_Bilingual.epub --summary_file Books/what_maisie_knew_Bilingual.out.txt
 
 
-caffeinate  python3 ./build_epub.py --input Books/what_maisie_knew_Bilingual.txt --output Books/what_maisie_knew_Bilingual.epub --summary_file what_maisie_knew_Bilingual.out
+caffeinate python3 ./build_epub.py --input Books/what_maisie_knew_Bilingual.txt --output Books/what_maisie_knew_Bilingual.epub --summary_file Books/what_maisie_knew_Bilingual.out.txt
+
+caffeinate  python3 build_chapter_audio.py -i Books/what_maisie_knew_Bilingual.txt -o Books/AudioOutput

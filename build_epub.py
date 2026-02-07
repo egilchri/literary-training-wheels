@@ -8,26 +8,47 @@ def parse_summaries(summary_file):
 
     current_title = None
     current_content = []
+    is_capturing_summary = False
 
     with open(summary_file, 'r', encoding='utf-8') as f:
         for line in f:
+            line_stripped = line.strip()
+            
+            # 1. Detect New Chapter Title
             title_match = re.match(r"^TITLE:\s*(.*)", line)
             if title_match:
                 if current_title:
                     summaries[current_title] = " ".join(current_content).strip()
                 current_title = re.sub(r'^chapter\s+', '', title_match.group(1).strip().lower())
                 current_content = []
-            elif line.startswith("SUMMARY:"):
-                content = line.replace("SUMMARY:", "").strip()
-                if content: current_content.append(content)
-            elif line.strip() in ["-" * 20, "=" * 40]:
+                is_capturing_summary = False
                 continue
-            elif current_title and line.strip():
-                current_content.append(line.strip())
 
+            # 2. Detect Summary Start
+            if line.startswith("SUMMARY:"):
+                is_capturing_summary = True
+                content = line.replace("SUMMARY:", "").strip()
+                if content:
+                    current_content.append(content)
+                continue
+
+            # 3. Detect Content Start (STOP capturing summary here)
+            if line.startswith("CONTENT:"):
+                is_capturing_summary = False
+                continue
+
+            # 4. Collect lines only if we are in the summary block
+            if is_capturing_summary and current_title and line_stripped:
+                # Ignore the separator lines
+                if line_stripped != "=" * 40:
+                    current_content.append(line_stripped)
+
+        # Catch the last one
         if current_title:
             summaries[current_title] = " ".join(current_content).strip()
+            
     return summaries
+    
 
 def build_bilingual_epub(input_txt, output_epub, summary_file=None):
     book = epub.EpubBook()
@@ -58,43 +79,49 @@ def build_bilingual_epub(input_txt, output_epub, summary_file=None):
         if not ch_text.strip() or "TITLE:" in ch_text[:100]:
             continue
             
-        # Extract title (e.g., "I")
         title_match = re.search(r"## ORIGINAL CHAPTER:\s*(.*)\n", ch_text)
         raw_ch_title = title_match.group(1).strip() if title_match else f"{current_ch_num}"
         
-        # CLEANUP: Remove technical markers and excessive whitespace
-        clean_body = re.sub(r"## ORIGINAL CHAPTER:.*\n", "", ch_text)
-        clean_body = re.sub(r"## TRANSLATED CHAPTER:.*\n", "", clean_body)
-        clean_body = re.sub(r"#{10,}", "", clean_body)
-        clean_body = re.sub(r"={10,}", "", clean_body)
-        
-        # Replace section markers with a simple bold label and NO extra breaks
-        clean_body = re.sub(r'### SECTION \d+ ORIGINAL', '<p><b>[Original]</b></p>', clean_body)
-        clean_body = re.sub(r'### SECTION \d+ TRANSLATED', '<p><b>[Translation]</b></p>', clean_body)
+        # Normalize mapping for Introduction
+        norm_title = "introduction" if raw_ch_title.upper() == "CONTENTS" else re.sub(r'^chapter\s+', '', raw_ch_title.lower())
+        display_title = "Introduction" if norm_title == "introduction" else f"Chapter {raw_ch_title}"
 
-        norm_title = re.sub(r'^chapter\s+', '', raw_ch_title.lower())
+        # 1. First, replace SECTION markers with unique placeholders so they don't get joined into paragraphs
+        processed_body = re.sub(r'### SECTION \d+ ORIGINAL', '\n\n[[ORIGINAL_LABEL]]\n\n', ch_text)
+        processed_body = re.sub(r'### SECTION \d+ TRANSLATED', '\n\n[[TRANSLATED_LABEL]]\n\n', processed_body)
+
+        # 2. Remove technical headers
+        processed_body = re.sub(r"## (ORIGINAL|TRANSLATED) CHAPTER:.*\n", "", processed_body)
+        processed_body = re.sub(r"#{10,}|={10,}", "", processed_body)
         
+        # 3. Process into paragraphs
+        raw_blocks = processed_body.strip().split('\n\n')
+        final_html_parts = []
+        
+        for block in raw_blocks:
+            joined_text = block.replace('\n', ' ').strip()
+            if not joined_text:
+                continue
+                
+            if joined_text == "[[ORIGINAL_LABEL]]":
+                final_html_parts.append('<p style="margin-top: 1.5em; font-weight: bold; color: #444;">[Original]</p>')
+            elif joined_text == "[[TRANSLATED_LABEL]]":
+                final_html_parts.append('<p style="margin-top: 1.5em; font-weight: bold; color: #444;">[Translation]</p>')
+            else:
+                # This is the actual story text
+                final_html_parts.append(f'<p style="margin-bottom: 0.8em;">{joined_text}</p>')
+
         summary_html = ""
         if norm_title in chapter_summaries:
-            # Removed the <hr/> and slashed margins to kill the whitespace
             summary_html = f"""
             <details style="background-color: #f4f4f4; padding: 10px; border: 1px solid #ccc; border-radius: 4px; margin: 10px 0;">
                 <summary style="font-weight: bold; cursor: pointer;">Show Chapter Summary</summary>
-                <div style="margin-top: 8px; font-style: italic;">{chapter_summaries[norm_title]}</div>
+                <div style="margin-top: 8px; font-style: italic; color: #555;">{chapter_summaries[norm_title]}</div>
             </details>
             """
 
-        # Convert remaining newlines to paragraphs for better spacing control
-        paragraphs = clean_body.strip().split('\n')
-        html_body = "".join([f"<p>{p.strip()}</p>" for p in paragraphs if p.strip()])
-
-        c = epub.EpubHtml(title=f"Chapter {raw_ch_title}", file_name=f'chap_{current_ch_num}.xhtml', lang='en')
-        # Combined title and body with tight CSS
-        c.content = f"""
-            <h1 style="margin-bottom: 5px;">Chapter {raw_ch_title}</h1>
-            {summary_html}
-            <div class="chapter-content">{html_body}</div>
-        """
+        c = epub.EpubHtml(title=display_title, file_name=f'chap_{current_ch_num}.xhtml', lang='en')
+        c.content = f'<h1 style="margin-bottom: 0.3em;">{display_title}</h1>{summary_html}<div>{"".join(final_html_parts)}</div>'
         
         book.add_item(c)
         chapters.append(c)
