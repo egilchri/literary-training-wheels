@@ -188,8 +188,12 @@ caffeinate python3 extract_chapters.py -i Books/wings_two_Bilingual.txt -start_c
 # just summarize the Introduction
 # caffeinate python3 extract_chapters.py -i Books/wings_two_Bilingual.txt -o Books/Extracted_Chapters_wings_two -start_chapter "Chapter I" -end_chapter "Chapter V"
 
-# caffeinate python3 extract_chapters.py -i Books/wings_two_Bilingual.txt -o Books/Extracted_Chapters_wings_two 
+# caffeinate python3 extract_chapters.py -i Books/wings_two_Bilingual.txt -o Books/Extracted_Chapters_wings_two --extract-analysis
 
 caffeinate python3 ./build_epub.py --input Books/wings_two_Bilingual.txt --output Books/wings_two_Bilingual.epub --summary_file Books/Extracted_Chapters_wings_two
 
-caffeinate  python3 -mpdb build_chapter_audio.py -i Books/wings_two_Bilingual.txt -o Books/AudioOutput1/wings_two_all.mp3
+caffeinate  python3 build_chapter_audio.py -i Books/wings_two_Bilingual.txt -o Books/AudioOutput1/wings_two_all.mp3
+
+caffeinate python3 ./build_epub.py --input Books/wings_two_Bilingual.txt --output Books/wings_two_Bilingual.epub --summary_file Books/Extracted_Chapters_wings_two
+
+git push origin main
