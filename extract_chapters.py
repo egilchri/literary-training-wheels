@@ -41,30 +41,25 @@ def extract_chapters(input_txt, output_file):
     raw_blocks = re.split(r'#{40}\n>>> CHAPTER BOUNDARY <<<\n#{40}', content)
     
     output_data = []
-    global_chapter_count = 1 # Sequential Arabic numbering
+    global_chapter_count = 1 # Sequential Arabic numbering to match build_epub.py
 
     print(f"[*] Analyzing {len(raw_blocks)} blocks for chapters...")
 
     for block in raw_blocks:
-        # Chapter Detection Logic from build_epub.py
-        # Look specifically for the narrative chapter header
+        # Chapter Detection Logic: Look for the narrative chapter header
         match = re.search(r'##\s+ORIGINAL\s+CHAPTER:\s+Chapter\s+([IVXLCDM]+)', block, re.IGNORECASE)
         
         if match:
-            # We found a real chapter
             chapter_label = f"Chapter {global_chapter_count}"
             print(f"[*] Extracting and Summarizing {chapter_label}...")
 
-            # Clean technical markers for the LLM context
-            # 1. Remove Section headers
+            # Clean technical markers so the LLM only sees narrative text
             clean_context = re.sub(r'###\s+SECTION\s+\d+\s+(ORIGINAL|TRANSLATED)', '', block)
-            # 2. Remove technical metadata lines
-            clean_context = re.sub(r"## (ORIGINAL|TRANSLATED) CHAPTER:.*\n", "", clean_context)
-            # 3. Remove boundary lines
+            clean_context = re.sub(r"## (ORIGINAL|TRANSLATED) CHAPTER:.*\n", "", clean_context, flags=re.IGNORECASE)
             clean_context = re.sub(r"#{10,}|={10,}", "", clean_context)
             clean_context = clean_context.strip()
 
-            # Generate Summary
+            # Generate Summary via Gemini
             summary = summarize_text(clean_context)
             
             # Format output for build_epub.py
@@ -74,7 +69,7 @@ def extract_chapters(input_txt, output_file):
             output_data.append("="*40 + "\n")
             
             global_chapter_count += 1
-            time.sleep(1) # Avoid rate limits
+            time.sleep(1) # Respect rate limits
 
     # Save results
     os.makedirs(os.path.dirname(output_file), exist_ok=True)

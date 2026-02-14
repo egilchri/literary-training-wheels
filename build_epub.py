@@ -69,7 +69,8 @@ def build_epub(input_txt, summary_txt, output_epub):
         if new_title:
             file_name = f'chap_{global_chapter_count}.xhtml'
             chapter = epub.EpubHtml(title=new_title, file_name=file_name, lang='en')
-            
+            # THIS IS THE FIX: Explicitly link the stylesheet in the 'style' folder
+            chapter.add_link(href='style/nav.css', rel='stylesheet', type='text/css')
             current_summary = summaries[summary_index] if summary_index < len(summaries) else "No summary available."
             cleaned_text = clean_chapter_content(ch_text)
             
