@@ -7,13 +7,14 @@ client = genai.Client(api_key=os.environ.get("GEMINI_API_KEY"))
 
 def analyze_text(text):
     """
-    Sends English original text to the LLM for literary analysis.
+    Sends aggregated English narrative text to the LLM for literary analysis.
     """
     if not text.strip():
         return "No content available for analysis."
     
-    prompt = f"""Perform a literary analysis of the following text. 
-    Focus on the themes, character developments, and major literary ideas taking shape. 
+    prompt = f"""Provide a concise character study based on this text. 
+    Focus only on how characters are presented and any immediate shifts in their situation. 
+    Avoid thematic or philosophical discussion.
 
     Text:
     {text}
@@ -26,12 +27,12 @@ def analyze_text(text):
         )
         return response.text.strip()
     except Exception as e:
-        print(f"[!] LLM Error with {MODEL_NAME} during analysis: {e}")
+        print(f"[!] LLM Error during analysis: {e}")
         return "Analysis generation failed."
 
 def summarize_text(text):
     """
-    Sends English original text to the LLM for action-only summarization.
+    Sends aggregated English narrative text to the LLM for action-only summarization.
     """
     if not text.strip():
         return "No content available."
@@ -50,7 +51,7 @@ def summarize_text(text):
         )
         return response.text.strip()
     except Exception as e:
-        print(f"[!] LLM Error with {MODEL_NAME} during summary: {e}")
+        print(f"[!] LLM Error during summary: {e}")
         return "Summary generation failed."
 
 def extract_chapters(input_txt, output_file, extract_analysis=False):
@@ -61,46 +62,62 @@ def extract_chapters(input_txt, output_file, extract_analysis=False):
     with open(input_txt, 'r', encoding='utf-8') as f:
         content = f.read()
 
-    # Split using the Chapter Boundary marker
-    raw_blocks = re.split(r'#{40}\n>>> CHAPTER BOUNDARY <<<\n#{40}', content)
+    # Split into sections based on the divider used in translate_epub.py
+    raw_sections = re.split(r'={40}', content)
     
     output_data = []
-    global_chapter_count = 1 
+    
+    # Tracking variables
+    current_chapter_title = None
+    current_chapter_accumulator = []
 
-    print(f"[*] Analyzing {len(raw_blocks)} blocks for chapters...")
+    # Regex to find the <h2> tag with ONLY a Roman Numeral
+    ROMAN_H2_RE = r"<h2[^>]*?>\s*([ivxlcdm]+)\s*</h2>"
 
-    for block in raw_blocks:
-        # Chapter Detection Logic: Look for the narrative chapter header
-        match = re.search(r'##\s+ORIGINAL\s+CHAPTER:\s+Chapter\s+([IVXLCDM]+)', block, re.IGNORECASE)
+    print(f"[*] Analyzing {len(raw_sections)} sections for narrative chapters...")
+
+    for section in raw_sections:
+        if not section.strip():
+            continue
+
+        # Check if this section is a Chapter Header
+        header_match = re.search(ROMAN_H2_RE, section, re.IGNORECASE)
         
-        if match:
-            chapter_label = f"Chapter {global_chapter_count}"
-            print(f"[*] Processing {chapter_label}...")
+        if header_match:
+            # If we were already building a chapter, finalize it before starting the next one
+            if current_chapter_title and current_chapter_accumulator:
+                process_and_append_chapter(
+                    current_chapter_title, 
+                    current_chapter_accumulator, 
+                    output_data, 
+                    extract_analysis
+                )
+            
+            # Start new chapter tracking
+            current_chapter_title = header_match.group(1).upper().strip()
+            current_chapter_accumulator = []
+            print(f"[*] Started collecting Chapter {current_chapter_title}")
+            continue
 
-            # Clean technical markers so the LLM only sees narrative text
-            clean_context = re.sub(r'###\s+SECTION\s+\d+\s+(ORIGINAL|TRANSLATED)', '', block)
-            clean_context = re.sub(r"## (ORIGINAL|TRANSLATED) CHAPTER:.*\n", "", clean_context, flags=re.IGNORECASE)
-            clean_context = re.sub(r"#{10,}|={10,}", "", clean_context)
-            clean_context = clean_context.strip()
+        # If we are currently inside a chapter, collect the ORIGINAL English text
+        if current_chapter_title:
+            # Extract only the content inside the ORIGINAL section
+            # This avoids sending the <details> translation blocks to the LLM
+            original_match = re.search(r"### SECTION \d+ ORIGINAL\n(.*?)(?=\n<details>|### SECTION|$)", section, re.DOTALL)
+            if original_match:
+                # Strip HTML tags so the LLM gets clean prose
+                clean_prose = re.sub(r'<[^>]+>', '', original_match.group(1)).strip()
+                if clean_prose:
+                    current_chapter_accumulator.append(clean_prose)
 
-            # Generate Summary
-            summary = summarize_text(clean_context)
-            
-            # Format output sequence
-            output_data.append(f"TITLE: {chapter_label}")
-            output_data.append(f"SUMMARY: {summary}") 
-            
-            # OPTIONAL: Generate and add Analysis
-            if extract_analysis:
-                print(f"[*] Generating literary analysis for {chapter_label}...")
-                analysis = analyze_text(clean_context)
-                output_data.append(f"ANALYSIS: {analysis}")
-            
-            output_data.append(f"CONTENT:\n{clean_context}\n")
-            output_data.append("="*40 + "\n")
-            
-            global_chapter_count += 1
-            time.sleep(1) # Respect rate limits
+    # Process the final chapter in the file
+    if current_chapter_title and current_chapter_accumulator:
+        process_and_append_chapter(
+            current_chapter_title, 
+            current_chapter_accumulator, 
+            output_data, 
+            extract_analysis
+        )
 
     # Save results
     os.makedirs(os.path.dirname(output_file), exist_ok=True)
@@ -108,15 +125,41 @@ def extract_chapters(input_txt, output_file, extract_analysis=False):
         f.write("\n".join(output_data))
     
     print(f"[*] Finished! Output saved to: {output_file}")
-    print(f"[*] Total Chapters Processed: {global_chapter_count - 1}")
+
+def process_and_append_chapter(title, text_list, output_list, extract_analysis):
+    """Aggregates text and calls LLM for summary and optional analysis."""
+    full_narrative = "\n\n".join(text_list).strip()
+    if not full_narrative:
+        return
+
+    print(f"    - Processing Chapter {title}...")
+    
+    # 1. Generate Summary
+    summary = summarize_text(full_narrative)
+    
+    # 2. Format Header
+    output_list.append(f"TITLE: Chapter {title}")
+    output_list.append(f"SUMMARY: {summary}")
+    
+    # 3. Optional Analysis
+    if extract_analysis:
+        analysis = analyze_text(full_narrative)
+        output_list.append(f"ANALYSIS: {analysis}")
+    
+    # 4. Append the clean text content
+    output_list.append(f"CONTENT:\n{full_narrative}\n")
+    output_list.append("="*40 + "\n")
+    
+    # Respect rate limits
+    time.sleep(1)
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("-i", "--input", required=True)
     parser.add_argument("-o", "--output_file", required=True)
-    # New optional argument for literary analysis
-    parser.add_argument("--extract-analysis", action="store_true", help="Generate literary analysis for each chapter")
+    parser.add_argument("--extract-analysis", action="store_true")
     args = parser.parse_args()
 
     extract_chapters(args.input, args.output_file, args.extract_analysis)
 
+    

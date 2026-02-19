@@ -10,154 +10,96 @@ PROGRESS_FILE = ".translation_progress"
 client = genai.Client(api_key=API_KEY)
 
 def clean_ai_response(text):
-    """Deletes common AI conversational artifacts."""
-    artifacts = [
-        "Here's my attempt", "Here is the translation", "Translation:", 
-        "Contemporary English:", "Certainly!", "Okay", "Enough thinking"
-    ]
+    artifacts = ["Here's my attempt", "Here is the translation", "Translation:", "Contemporary English:"]
     cleaned = text.strip()
     for artifact in artifacts:
         cleaned = re.sub(f"(?i)^{artifact}.*?[:\\n]", "", cleaned)
     return cleaned.strip()
 
-def split_into_sentences(text):
-    """Splits text into sentences based on punctuation."""
-    sentences = re.split(r'(?<=[.!?])\s+', text.strip())
-    return [s for s in sentences if s.strip()]
-
-def is_narrative_start(el):
-    """Triggers translation at the first 15-word paragraph."""
-    text = el.get_text().strip()
-    return el.name == 'p' and len(text.split()) >= 15
-
-def run_interleaved_translation(epub_path, section_limit=None, min_sect_length=500, num_sentences=None, break_at_p_tags=False, chapter_tags=None):
-    if chapter_tags is None:
-        chapter_tags = ['h1', 'h2', 'h3']
-
-    start_section = 0
-    if os.path.exists(PROGRESS_FILE):
-        with open(PROGRESS_FILE, "r") as f:
-            line = f.read().strip()
-            start_section = int(line) if line.isdigit() else 0
-
-    book = epub.read_epub(epub_path)
-    output_file = os.path.splitext(epub_path)[0] + "_Bilingual.txt"
+def is_strict_chapter(text):
+    """
+    Matches 'Chapter IV' OR just 'IV' (Roman numerals).
+    Allows for leading/trailing whitespace.
+    """
+    # Pattern 1: 'Chapter' + Roman Numeral
+    pattern_with_word = r"^\s*chapter\s+[ivxlcdm]+\s*$"
+    # Pattern 2: Standalone Roman Numeral (must be the only thing in the tag)
+    pattern_standalone = r"^\s*[ivxlcdm]+\s*$"
     
-    if not os.path.exists(output_file):
-        title = book.get_metadata('DC', 'title')[0][0] if book.get_metadata('DC', 'title') else "Unknown"
-        author = book.get_metadata('DC', 'creator')[0][0] if book.get_metadata('DC', 'creator') else "Unknown"
-        with open(output_file, "w", encoding="utf-8") as f:
-            f.write(f"TITLE: {title}\nAUTHOR: {author}\n========================================\n")
+    val = text.lower().strip()
+    return bool(re.match(pattern_with_word, val) or re.match(pattern_standalone, val))
 
-    all_elements = []
-    for item in book.get_items_of_type(ebooklib.ITEM_DOCUMENT):
-        soup = BeautifulSoup(item.get_content(), 'html.parser')
-        for el in soup.find_all(['p', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6']):
-            if el.get_text(strip=True):
-                all_elements.append(el)
-
-    # SEGMENTATION ENGINE
-    sections, narrative_found, sentence_buffer, chunk_buffer, words_in_chunk = [], False, [], [], 0
-
-    for el in all_elements:
-        is_header = el.name.lower() in chapter_tags
-        
-        if is_header and sentence_buffer:
-            sections.append((True, " ".join(sentence_buffer), False))
-            sentence_buffer = []
-
-        if not narrative_found and is_narrative_start(el):
-            narrative_found = True
-
-        if not narrative_found:
-            sections.append((False, str(el), False))
-        elif is_header:
-            sections.append((True, el.get_text().strip(), True))
-        else:
-            text = el.get_text().strip()
-            if break_at_p_tags and el.name == 'p':
-                sections.append((True, str(el), False))
-            elif num_sentences:
-                sentences = split_into_sentences(text)
-                for s in sentences:
-                    sentence_buffer.append(s)
-                    if len(sentence_buffer) >= num_sentences:
-                        sections.append((True, " ".join(sentence_buffer), False))
-                        sentence_buffer = []
-            else:
-                chunk_buffer.append(el)
-                words_in_chunk += len(text.split())
-                if words_in_chunk >= min_sect_length:
-                    sections.append((True, "\n".join([str(x) for x in chunk_buffer]), False))
-                    chunk_buffer, words_in_chunk = [], 0
-
-    if sentence_buffer: sections.append((True, " ".join(sentence_buffer), False))
-    if chunk_buffer: sections.append((True, "\n".join([str(x) for x in chunk_buffer]), False))
-
-    total = len(sections)
+def run_interleaved_translation(epub_path, section_limit=None, chapter_limit=None, min_sect_length=500, break_at_p_tags=False, chapter_tags="h1,h2,h3"):
+    book = epub.read_epub(epub_path)
+    out_file = epub_path.replace(".epub", "_Bilingual.txt")
+    tags_to_watch = [t.strip().lower() for t in chapter_tags.split(",")]
+    
+    idx = 0
     translated_count = 0
-    last_translation = "No previous context."
-    idx = start_section
+    chapters_processed = 0
+    
+    if os.path.exists(PROGRESS_FILE):
+        with open(PROGRESS_FILE, "r") as f: 
+            idx = int(f.read().strip())
+            print(f"Resuming from index {idx}...")
 
-    print(f"[*] Resuming at section {idx+1}/{total}. Chapter Tags: {chapter_tags}")
+    items = [item for item in book.get_items() if item.get_type() == ebooklib.ITEM_DOCUMENT]
 
-    while idx < total:
-        do_trans, content, is_header = sections[idx]
-        with open(output_file, "a", encoding="utf-8") as f:
+    with open(out_file, "a" if idx > 0 else "w", encoding="utf-8") as f:
+        for i, item in enumerate(items[idx:]):
+            current_index = idx + i
+            soup = BeautifulSoup(item.get_content(), "html.parser")
+            elements = soup.find_all(['p'] + tags_to_watch)
             
-            if is_header:
-                # Chapter Boundary Markup
-                f.write(f"\n\n{'#'*40}\n>>> CHAPTER BOUNDARY <<<\n{'#'*40}\n")
-                f.write(f"## ORIGINAL CHAPTER: {content}\n")
-            else:
-                display_original = f"<p>{content}</p>" if (do_trans and num_sentences) else content
-                f.write(f"\n<div class='original-text'>\n### SECTION {idx+1} ORIGINAL\n{display_original}\n</div>\n")
-            
-            if do_trans:
-                print(f"[*] Translating {'Chapter' if is_header else 'Segment'} {translated_count+1}...", end=" ", flush=True)
-                time.sleep(15)
+            for el in elements:
+                text_content = el.get_text().strip()
+                if not text_content: continue
+
+                is_header_tag = el.name in tags_to_watch
                 
-                clean_text = content if (num_sentences or is_header) else BeautifulSoup(content, 'html.parser').get_text().strip()
-                prompt = f"PREVIOUS TRANSLATION CONTEXT: {last_translation}\n\nCURRENT TEXT TO TRANSLATE:\n{clean_text}"
-                
-                try:
-                    res = client.models.generate_content(
-                        model=MODEL_ID,
-                        config={'system_instruction': "ACT AS A LITERARY TRANSLATOR. NO CONVERSATION. NO INTRODUCTIONS. OUTPUT ONLY CONTEMPORARY ENGLISH PROSE."},
-                        contents=prompt[:12000]
-                    )
-                    sanitized = clean_ai_response(res.text)
-                    last_translation = sanitized 
+                if is_header_tag:
+                    f.write(f"\n<div class='original-text'>\n### SECTION {translated_count + 1} ORIGINAL\n{str(el)}\n</div>\n")
+                    f.write(f"\n### EXTRACTED HEADER: {text_content}\n")
+                    f.write(f"\n========================================\n")
                     
-                    if is_header:
-                        f.write(f"## TRANSLATED CHAPTER: {sanitized}\n")
-                        f.write(f"{'#'*40}\n\n")
+                    if is_strict_chapter(text_content):
+                        chapters_processed += 1
+                        print(f"Validated Chapter ({chapters_processed}/{chapter_limit}): {text_content}")
                     else:
-                        fmt = "".join([f"<p><i>{line.strip()}</i></p>" for line in sanitized.split('\n') if line.strip()])
-                        f.write(f"\n<details><summary>Translation</summary>\n<div class='translation-content'>{fmt}</div>\n</details>\n")
+                        print(f"Skipping (Non-Chapter Header): {text_content}")
+                else:
+                    if break_at_p_tags or len(text_content) >= min_sect_length:
+                        f.write(f"\n<div class='original-text'>\n### SECTION {translated_count + 1} ORIGINAL\n{str(el)}\n</div>\n")
+                        try:
+                            print(f"Translating section {translated_count + 1}...", end=" ", flush=True)
+                            prompt = f"Translate this into contemporary English. Only provide the translation:\n\n{text_content}"
+                            response = client.models.generate_content(model=MODEL_ID, contents=prompt)
+                            sanitized = clean_ai_response(response.text)
+                            
+                            fmt = "".join([f"<p><i>{line.strip()}</i></p>" for line in sanitized.split('\n') if line.strip()])
+                            f.write(f"\n<details><summary>Translation</summary>\n<div class='translation-content'>{fmt}</div>\n</details>\n")
+                            print("Done.")
+                        except Exception as e:
+                            print(f"Error: {e}")
+                        f.write(f"\n========================================\n")
                     
-                    translated_count += 1
-                    print("Done.")
-                except Exception as e:
-                    print(f"Error: {e}")
+                translated_count += 1
+                f.flush()
 
-            f.write(f"\n========================================\n")
-            f.flush()
-        idx += 1
-        with open(PROGRESS_FILE, "w") as f: f.write(str(idx))
-        if section_limit and translated_count >= section_limit: break
+                if chapter_limit and chapters_processed >= chapter_limit: break
+            if (chapter_limit and chapters_processed >= chapter_limit):
+                print("Chapter limit reached.")
+                break
+            with open(PROGRESS_FILE, "w") as pf: pf.write(str(current_index + 1))
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("-i", "--input", required=True)
-    parser.add_argument("-l", "--limit", type=int, default=None)
+    parser.add_argument("-c", "--chapter_limit", type=int, default=None)
     parser.add_argument("-m", "--min_sect_length", type=int, default=500)
-    parser.add_argument("-s", "--num_sentences", type=int, default=None)
-    parser.add_argument("-break_at_p_tags", action="store_true")
-    parser.add_argument("-chapter_tags", type=str, default="h1,h2,h3")
+    parser.add_argument("--break_at_p_tags", action="store_true")
+    parser.add_argument("--chapter_tags", type=str, default="h1,h2,h3")
     
     args = parser.parse_args()
-    tags_list = [t.strip().lower() for t in args.chapter_tags.split(',')]
-    
-    run_interleaved_translation(args.input, args.limit, args.min_sect_length, args.num_sentences, args.break_at_p_tags, tags_list)
+    run_interleaved_translation(args.input, None, args.chapter_limit, args.min_sect_length, args.break_at_p_tags, args.chapter_tags)
 

@@ -3,11 +3,13 @@ import re
 import argparse
 from ebooklib import epub
 
+def is_strictly_roman(text):
+    """Matches standalone Roman numerals like 'VII' or 'I'."""
+    pattern = r"^\s*[ivxlcdm]+\s*$"
+    return bool(re.match(pattern, text, re.IGNORECASE))
+
 def extract_metadata(summary_path):
-    """
-    Extracts both SUMMARY and ANALYSIS from the summary file.
-    Returns a list of dictionaries: [{'summary': '...', 'analysis': '...'}, ...]
-    """
+    """Extracts SUMMARY and ANALYSIS from the summary file."""
     if not os.path.exists(summary_path):
         return []
     
@@ -27,6 +29,15 @@ def extract_metadata(summary_path):
         def format_to_html(text):
             if not text: return ""
             text = text.strip()
+            # Clean technical artifacts and SECTION markers
+            text = re.sub(r'^\s*[#=]{3,}\s*$', '', text, flags=re.MULTILINE)
+            text = re.sub(r'###\s+SECTION\s+\d+\s+(ORIGINAL|TRANSLATED)', '', text, flags=re.IGNORECASE)
+            
+            # Handle bullet points
+            text = re.sub(r'^\s*[\*\-]\s*(.*)', r'<li>\1</li>', text, flags=re.MULTILINE)
+            if '<li>' in text:
+                text = re.sub(r'(<li>.*</li>)', r'<ul>\1</ul>', text, flags=re.DOTALL)
+            
             paragraphs = text.split('\n\n')
             return "".join([f"<p>{p.strip()}</p>" for p in paragraphs if p.strip()])
 
@@ -37,140 +48,132 @@ def extract_metadata(summary_path):
         
     return metadata_list
 
-def clean_chapter_title(ch_text, global_count):
-    """Identifies real chapters and returns a sequential Arabic title."""
-    match = re.search(r'##\s+ORIGINAL\s+CHAPTER:\s+Chapter\s+([IVXLCDM]+)', ch_text, re.IGNORECASE)
-    if match:
-        return f"Chapter {global_count}"
-    return None
-
-def clean_chapter_content(ch_text):
-    """Strips out technical metadata and boundary lines."""
-    cleaned = re.sub(r'###\s+SECTION\s+\d+\s+(ORIGINAL|TRANSLATED)', '', ch_text)
-    cleaned = re.sub(r'##\s+ORIGINAL\s+CHAPTER:.*?\n', '', cleaned, flags=re.IGNORECASE)
-    cleaned = re.sub(r'##\s+TRANSLATED\s+CHAPTER:.*?\n', '', cleaned, flags=re.IGNORECASE)
-    cleaned = re.sub(r'#{10,}', '', cleaned)
-    cleaned = re.sub(r'={10,}', '', cleaned)
-    return cleaned.strip()
-
-def build_epub(input_txt, summary_txt, output_epub):
-    with open(input_txt, 'r', encoding='utf-8') as f:
-        content = f.read()
-
-    raw_chapters = re.split(r'#{40}\n>>> CHAPTER BOUNDARY <<<\n#{40}', content)
-    chapter_metadata = extract_metadata(summary_txt)
-
+def create_epub(bilingual_txt, summary_txt, output_epub):
     book = epub.EpubBook()
-    book.set_identifier('id_wings_vol2_responsive_v1')
-    book.set_title('The Wings of the Dove - Responsive Edition')
+    book.set_identifier('id123456')
+    book.set_title('The Wings of the Dove - Bilingual Edition')
     book.set_language('en')
     book.add_author('Henry James')
 
-    epub_chapters = []
-    meta_index = 0
-    global_chapter_count = 1 
+    chapter_metadata = extract_metadata(summary_txt)
+    
+    with open(bilingual_txt, 'r', encoding='utf-8') as f:
+        full_content = f.read()
 
-    for ch_text in raw_chapters:
-        if not ch_text.strip(): continue
-        new_title = clean_chapter_title(ch_text, global_chapter_count)
+    sections = re.split(r'={40,}', full_content)
+    chapters = []
+    current_chapter_html = ""
+    chapter_count = 0
+    ROMAN_H2_PATTERN = r"<h2[^>]*?>\s*([ivxlcdm]+)\s*</h2>"
+
+    print(f"[*] Building EPUB with Audio Controls...")
+
+    for section in sections:
+        if not section.strip():
+            continue
+
+        # Strip Technical markers
+        clean_section = re.sub(r'###\s+SECTION\s+\d+\s+(ORIGINAL|TRANSLATED)', '', section, flags=re.IGNORECASE)
+        clean_section = re.sub(r'^\s*[#=]{3,}\s*$', '', clean_section, flags=re.MULTILINE)
+
+        header_match = re.search(ROMAN_H2_PATTERN, clean_section, re.IGNORECASE)
         
-        if new_title:
-            file_name = f'chap_{global_chapter_count}.xhtml'
-            chapter = epub.EpubHtml(title=new_title, file_name=file_name, lang='en')
+        if header_match:
+            if chapter_count > 0 and current_chapter_html:
+                save_chapter(book, chapters, chapter_count, current_chapter_html, chapter_metadata)
             
-            meta = chapter_metadata[meta_index] if meta_index < len(chapter_metadata) else {'summary': "<p>N/A</p>", 'analysis': None}
-            cleaned_text = clean_chapter_content(ch_text)
-            
-            analysis_html = ""
-            if meta['analysis']:
-                analysis_html = f'''
-                <details class="summary-box">
-                    <summary>Literary Analysis (Click to expand)</summary>
-                    <div class="summary-content">
-                        {meta['analysis']}
-                    </div>
-                </details>
-                '''
-            
-            chapter.content = f'''
-                <h1 class="chapter-title">{new_title}</h1>
-                
-                <details class="summary-box">
-                    <summary>Chapter Summary (Click to expand)</summary>
-                    <div class="summary-content">
-                        {meta['summary']}
-                    </div>
-                </details>
+            chapter_count += 1
+            roman_val = header_match.group(1).upper()
+            current_chapter_html = f'<h1 class="chapter-title">Chapter {roman_val}</h1>'
+            continue
 
-                {analysis_html}
+        if chapter_count > 0:
+            current_chapter_html += f'<div class="section-block">{clean_section}</div>'
 
-                <div class="main-body">
-                    {cleaned_text}
-                </div>
-            '''
-            chapter.add_link(href='style/nav.css', rel='stylesheet', type='text/css')
-            
-            book.add_item(chapter)
-            epub_chapters.append(chapter)
-            meta_index += 1
-            global_chapter_count += 1
+    if chapter_count > 0 and current_chapter_html:
+        save_chapter(book, chapters, chapter_count, current_chapter_html, chapter_metadata)
 
-    book.toc = tuple(epub_chapters)
-    book.add_item(epub.EpubNcx())
-    book.add_item(epub.EpubNav())
-
-    # RESPONSIVE CSS
     style = '''
-        /* Global settings */
-        body { font-family: serif; line-height: 1.5; margin: 0; padding: 1em; }
-        h1.chapter-title { text-align: center; color: #333; margin-bottom: 1.2em; font-size: 1.8em; }
-
-        /* Summary and Analysis Boxes */
-        .summary-box { margin-bottom: 15px; border: 1px solid #ddd; border-radius: 4px; overflow: hidden; }
-        summary { padding: 10px; background-color: #eeeeee; cursor: pointer; font-weight: bold; list-style: none; }
-        .summary-content { 
-            padding: 15px; 
-            background-color: #f6f6f6; 
-            border-top: 1px solid #ddd;
-            font-style: italic; 
-            color: #444;
-            font-size: 1em;
-        }
-        .summary-content p { margin-bottom: 1em; }
-
-        /* Main Body Bilingual Layout */
-        .original-text { color: #000; margin-top: 1.5em; display: block; font-size: 1.1em; }
-        .translation-content { color: #666; font-style: italic; margin-bottom: 1.5em; display: block; font-size: 1em; }
-
-        /* --- RESPONSIVE MEDIA QUERIES --- */
+        body { font-family: "Times New Roman", serif; line-height: 1.6; padding: 1em; }
+        h1.chapter-title { text-align: center; text-transform: uppercase; margin-top: 2em; margin-bottom: 0.5em; }
         
-        /* For Small Phones (Width < 480px) */
-        @media only screen and (max-width: 480px) {
-            body { padding: 0.5em; }
-            h1.chapter-title { font-size: 1.4em; }
-            .summary-content { font-size: 0.9em; padding: 10px; }
-            .original-text { font-size: 1em; }
-            .translation-content { font-size: 0.9em; }
-        }
+        .chapter-audio { text-align: center; margin-bottom: 2em; }
+        audio { width: 100%; max-width: 400px; }
 
-        /* For Tablets (Width between 481px and 768px) */
-        @media only screen and (min-width: 481px) and (max-width: 768px) {
-            body { padding: 1.5em; }
-            h1.chapter-title { font-size: 1.6em; }
-            .summary-content { font-size: 0.95em; }
-        }
+        details { margin-bottom: 1.5em; border: 1px solid #ddd; border-radius: 4px; }
+        details summary { cursor: pointer; padding: 10px; font-weight: bold; background-color: #f0f0f0; }
+        
+        .summary-box { padding: 15px; font-style: italic; background-color: #f9f9f9; }
+        .analysis-box { padding: 15px; background-color: #eef2f7; }
+        .box-label { font-weight: bold; text-transform: uppercase; display: block; margin-bottom: 5px; font-size: 0.8em; color: #555; }
+        
+        .original-text { color: #000; margin-bottom: 0.5em; display: block; }
+        .translation-content { color: #666; font-style: italic; margin-bottom: 1.5em; display: block; border-bottom: 1px solid #eee; padding-bottom: 1em; }
     '''
     nav_css = epub.EpubItem(uid="style_nav", file_name="style/nav.css", media_type="text/css", content=style)
     book.add_item(nav_css)
-    book.spine = ['nav'] + epub_chapters
-    epub.write_epub(output_epub, book, {})
-    print(f"[SUCCESS] Responsive EPUB created with optimized phone/tablet views.")
+
+    book.toc = tuple(chapters)
+    book.add_item(epub.EpubNav())
+    book.spine = ['nav'] + chapters
+
+    epub.write_epub(output_epub, book)
+    print(f"[*] EPUB created successfully: {output_epub}")
+
+def save_chapter(book, chapters_list, count, html_content, metadata_list):
+    """Inserts Audio Player and Collapsible Metadata under the Chapter Title."""
+    idx = count - 1
+    meta = metadata_list[idx] if 0 <= idx < len(metadata_list) else {'summary': '', 'analysis': None}
+    
+    # Generate Audio Control HTML
+    audio_url = f"https://media.githubusercontent.com/media/egilchri/wings_one/main/Chapter_{count}.mp3"
+    audio_html = f'''
+    <div class="chapter-audio">
+        <audio controls preload="metadata">
+            <source src="{audio_url}" type="audio/mpeg">
+        </audio>
+    </div>
+    '''
+
+    # Build Collapsible Metadata
+    meta_html = f'''
+    <details>
+        <summary>Chapter Summary & Character Study</summary>
+        <div class="summary-box">
+            <span class="box-label">Summary</span>
+            {meta["summary"]}
+        </div>
+        '''
+    if meta['analysis']:
+        meta_html += f'''
+        <div class="analysis-box">
+            <span class="box-label">Character Study</span>
+            {meta["analysis"]}
+        </div>
+        '''
+    meta_html += '</details>'
+    
+    # Inject both under the <h1> title
+    title_end_tag = "</h1>"
+    parts = html_content.split(title_end_tag, 1)
+    
+    if len(parts) == 2:
+        # Order: Title -> Audio -> Collapsible Metadata -> Prose
+        final_html = f"<html><body>{parts[0]}{title_end_tag}{audio_html}{meta_html}{parts[1]}</body></html>"
+    else:
+        final_html = f"<html><body>{audio_html}{meta_html}{html_content}</body></html>"
+    
+    chapter_item = epub.EpubHtml(title=f'Chapter {count}', file_name=f'chap_{count:02d}.xhtml', lang='en')
+    chapter_item.content = final_html
+    chapter_item.add_link(href='style/nav.css', rel='stylesheet', type='text/css')
+    book.add_item(chapter_item)
+    chapters_list.append(chapter_item)
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument("--input", required=True)
-    parser.add_argument("--summary_file", required=True)
-    parser.add_argument("--output", required=True)
+    parser.add_argument("-i", "--input", required=True)
+    parser.add_argument("-s", "--summary", required=True)
+    parser.add_argument("-o", "--output", required=True)
     args = parser.parse_args()
-    build_epub(args.input, args.summary_file, args.output)
+    create_epub(args.input, args.summary, args.output)
 
