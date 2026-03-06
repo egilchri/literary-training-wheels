@@ -6,6 +6,19 @@ import edge_tts
 # Configuration for the narrator
 VOICE = "en-GB-SoniaNeural"
 
+def int_to_roman(n):
+    """Converts an integer to a Roman numeral."""
+    val = [1000, 900, 500, 400, 100, 90, 50, 40, 10, 9, 5, 4, 1]
+    syb = ["M", "CM", "D", "CD", "C", "XC", "L", "XL", "X", "IX", "V", "IV", "I"]
+    roman_num = ""
+    i = 0
+    while n > 0:
+        for _ in range(n // val[i]):
+            roman_num += syb[i]
+            n -= val[i]
+        i += 1
+    return roman_num
+
 async def synthesize_to_segment(text, voice=VOICE):
     """Synthesizes text to an AudioSegment."""
     temp_file = f"temp_{asyncio.current_task().get_name()}.mp3"
@@ -46,6 +59,7 @@ async def build_audiobook(input_txt, output_mp3, num_chapters=None, dry_run=Fals
     js_map = {}
     cumulative_seconds = 0.0
     processed_chapters = 0
+    chapter_count = 1 # Sequential counter to prevent recycling
 
     # Regex to find the <h2> tag with ONLY a Roman Numeral
     ROMAN_H2_RE = r"<h2[^>]*?>\s*([ivxlcdm]+)\s*</h2>"
@@ -53,8 +67,8 @@ async def build_audiobook(input_txt, output_mp3, num_chapters=None, dry_run=Fals
     print(f"[*] Analyzing sections for narrative chapters...")
 
     for section in raw_sections:
-        if not section.strip():
-            continue
+        if num_chapters and processed_chapters >= num_chapters:
+            break
 
         # Detect Chapter Header
         header_match = re.search(ROMAN_H2_RE, section, re.IGNORECASE)
@@ -78,11 +92,9 @@ async def build_audiobook(input_txt, output_mp3, num_chapters=None, dry_run=Fals
                     cumulative_seconds = new_offset
                     processed_chapters += 1
                 
-                if num_chapters and processed_chapters >= num_chapters:
-                    current_chapter_title = None # Stop accumulation
-                    break
-
-            current_chapter_title = header_match.group(1).upper().strip()
+            # Use incrementing counter instead of tag content
+            current_chapter_title = int_to_roman(chapter_count)
+            chapter_count += 1
             current_chapter_accumulator = []
             print(f"[*] Found Chapter {current_chapter_title}...")
             continue
@@ -165,5 +177,4 @@ if __name__ == "__main__":
     args = parser.parse_args()
     
     asyncio.run(build_audiobook(args.input, args.output, args.num_chapters, args.dry_run))
-
     

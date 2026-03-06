@@ -3,3 +3,6 @@ __pycache__/
 .DS_Store
 venv/
 .env
+*_desc.json
+test_api.py
+check_gemini_models.py

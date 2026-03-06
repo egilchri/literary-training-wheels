@@ -1,13 +1,33 @@
 import sys, os, time, ebooklib, argparse, re
+import backoff  # New import for handling rate limits
 from ebooklib import epub
 from bs4 import BeautifulSoup
 from google import genai
+from google.genai import errors # New import for specific error handling
 
 # --- CONFIGURATION ---
 API_KEY = os.environ.get("GEMINI_API_KEY")
-MODEL_ID = "gemini-2.0-flash-lite"
+#MODEL_ID = "gemini-2.0-flash"
+MODEL_ID = "gemini-2.5-flash"
+
 PROGRESS_FILE = ".translation_progress"
 client = genai.Client(api_key=API_KEY)
+
+# --- BACKOFF INTEGRATION ---
+# This decorator will retry the function if a 429 error occurs.
+# It uses exponential backoff (2s, 4s, 8s...) up to 5 times.
+backoff.on_exception(
+    backoff.expo,
+    errors.ClientError,
+    giveup=lambda e: e.code != 429,
+    max_tries=10,        # Increase tries to wait through longer lockout periods
+    max_time=300         # Allow it to wait up to 5 minutes total if needed
+)
+
+
+def call_gemini_with_backoff(prompt):
+    """Wrapper to handle API calls with automatic retries for rate limits."""
+    return client.models.generate_content(model=MODEL_ID, contents=prompt)
 
 def clean_ai_response(text):
     artifacts = ["Here's my attempt", "Here is the translation", "Translation:", "Contemporary English:"]
@@ -17,15 +37,8 @@ def clean_ai_response(text):
     return cleaned.strip()
 
 def is_strict_chapter(text):
-    """
-    Matches 'Chapter IV' OR just 'IV' (Roman numerals).
-    Allows for leading/trailing whitespace.
-    """
-    # Pattern 1: 'Chapter' + Roman Numeral
     pattern_with_word = r"^\s*chapter\s+[ivxlcdm]+\s*$"
-    # Pattern 2: Standalone Roman Numeral (must be the only thing in the tag)
     pattern_standalone = r"^\s*[ivxlcdm]+\s*$"
-    
     val = text.lower().strip()
     return bool(re.match(pattern_with_word, val) or re.match(pattern_standalone, val))
 
@@ -72,13 +85,16 @@ def run_interleaved_translation(epub_path, section_limit=None, chapter_limit=Non
                         f.write(f"\n<div class='original-text'>\n### SECTION {translated_count + 1} ORIGINAL\n{str(el)}\n</div>\n")
                         try:
                             print(f"Translating section {translated_count + 1}...", end=" ", flush=True)
-                            prompt = f"Translate this into contemporary English. Only provide the translation:\n\n{text_content}"
-                            response = client.models.generate_content(model=MODEL_ID, contents=prompt)
-                            sanitized = clean_ai_response(response.text)
+                            prompt = f"Summarize this in contemporary English. Only provide the summary:\n\n{text_content}"
                             
+                            # Use the new backoff wrapper instead of direct client call
+                            response = call_gemini_with_backoff(prompt)
+                            
+                            sanitized = clean_ai_response(response.text)
                             fmt = "".join([f"<p><i>{line.strip()}</i></p>" for line in sanitized.split('\n') if line.strip()])
                             f.write(f"\n<details><summary>Translation</summary>\n<div class='translation-content'>{fmt}</div>\n</details>\n")
                             print("Done.")
+                            time.sleep(12)  # Mandatory 12-second pause to stay under 5 RPM
                         except Exception as e:
                             print(f"Error: {e}")
                         f.write(f"\n========================================\n")
@@ -102,4 +118,4 @@ if __name__ == "__main__":
     
     args = parser.parse_args()
     run_interleaved_translation(args.input, None, args.chapter_limit, args.min_sect_length, args.break_at_p_tags, args.chapter_tags)
-
+    

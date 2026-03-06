@@ -78,20 +78,28 @@ def create_epub(bilingual_txt, summary_txt, output_epub):
 
         header_match = re.search(ROMAN_H2_PATTERN, clean_section, re.IGNORECASE)
         
+        # robot  begin
+        # new
         if header_match:
-            if chapter_count > 0 and current_chapter_html:
+            # Save the previous chapter only if it has actual content
+            if chapter_count > 0 and '<div class="section-block">' in current_chapter_html:
                 save_chapter(book, chapters, chapter_count, current_chapter_html, chapter_metadata)
             
-            chapter_count += 1
+            # Reset for the new chapter, but don't increment chapter_count yet
             roman_val = header_match.group(1).upper()
             current_chapter_html = f'<h1 class="chapter-title">Chapter {roman_val}</h1>'
             continue
 
-        if chapter_count > 0:
+        # This block now handles the incrementing
+        if current_chapter_html:
+            if '<div class="section-block">' not in current_chapter_html:
+                chapter_count += 1
             current_chapter_html += f'<div class="section-block">{clean_section}</div>'
 
-    if chapter_count > 0 and current_chapter_html:
+    # Final save check (same logic as above)
+    if chapter_count > 0 and '<div class="section-block">' in current_chapter_html:
         save_chapter(book, chapters, chapter_count, current_chapter_html, chapter_metadata)
+        # robot end
 
     style = '''
         body { font-family: "Times New Roman", serif; line-height: 1.6; padding: 1em; }
