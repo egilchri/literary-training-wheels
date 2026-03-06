@@ -7,7 +7,7 @@ from bs4 import BeautifulSoup
 import re
 
 # Default CSS path based on your setup
-DEFAULT_CSS_PATH = '/Users/edgargilchrist/tools/BookTranslator/Books/HtmlzOutput/wings/wings_one/test_style.css'
+DEFAULT_CSS_PATH = '/Users/edgargilchrist/tools/BookTranslator/Books/WingsOfDove/wings/wings_one/test_style.css'
 
 def clean_text_content(text):
     """Removes technical markers, artifacts, and duplicate chapter headings."""
@@ -15,8 +15,7 @@ def clean_text_content(text):
     text = re.sub(r'^\s*[#=]{3,}\s*$', '', text, flags=re.MULTILINE)
     text = re.sub(r'<div class="chapter-audio">.*?</div>', '', text, flags=re.DOTALL | re.IGNORECASE)
     
-    # NEW: Remove existing chapter titles from the original text (e.g., <h1>Chapter III</h1>)
-    # This prevents the double-title issue seen in your screenshots.
+    # Remove existing chapter titles from the original text (e.g., <h1>Chapter III</h1>)
     text = re.sub(r'<h[12][^>]*>.*?</h[12]>', '', text, flags=re.IGNORECASE | re.DOTALL)
     
     return text
@@ -27,7 +26,7 @@ def epub_to_jekyll_htmlz(epub_path, css_path, output_folder):
         print(f"Error: EPUB not found: {epub_path}")
         return
 
-    # Ensure the target directory exists, but DO NOT delete it
+    # Ensure the target directory exists
     os.makedirs(output_folder, exist_ok=True)
     
     # Ensure the Illustrations subfolder exists for your .png files
@@ -62,16 +61,15 @@ def epub_to_jekyll_htmlz(epub_path, css_path, output_folder):
             cleaned_html = clean_text_content(body_content.decode_contents())
             chapter_title = f"Chapter {count}"
             
-            # This NEW block combines the Title and Image into one horizontal row
+            # FIXED: Header now uses a class for CSS control rather than hardcoded flex styles
             combined_header_html = f"""
-<div class="chapter-header-row" style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 40px; gap: 30px;">
-    <h1 class="chapter-title" style="margin: 0; flex: 1; font-size: 2.5em;">{chapter_title}</h1>
-    <div class="chapter-illustration" style="flex: 1.5; text-align: right;">
-        <img src="Illustrations/Chap_{count}_illus.png" alt="Illustration for {chapter_title}" style="width: 100%; max-width: 500px; border-radius: 8px; box-shadow: 0 4px 8px rgba(0,0,0,0.2);">
+<div class="chapter-header-row">
+    <h1 class="chapter-title">{chapter_title}</h1>
+    <div class="chapter-illustration">
+        <img src="Illustrations/Chap_{count}_illus.png" alt="Illustration for {chapter_title}">
     </div>
 </div>"""
             
-            # Now we use {combined_header_html} instead of separate variables
             chapter_page_content = f"""---
 layout: default
 title: "{chapter_title}"
@@ -82,7 +80,6 @@ audio_url: "https://media.githubusercontent.com/media/egilchri/wings_one/main/Ch
 
 {cleaned_html}
 """
-
             # Write individual chapter file
             with open(os.path.join(output_folder, chapter_filename), 'w', encoding='utf-8') as f:
                 f.write(chapter_page_content)
@@ -99,6 +96,7 @@ audio_url: "https://media.githubusercontent.com/media/egilchri/wings_one/main/Ch
 layout: default
 title: "{book_title}"
 css: test_style.css
+viewport: "width=device-width, initial-scale=1.0"
 ---
 <h1 class="main-title">{book_title}</h1>
 <div class="chapter-grid">
@@ -108,25 +106,62 @@ css: test_style.css
     with open(os.path.join(output_folder, 'index.html'), 'w', encoding='utf-8') as f:
         f.write(index_html)
 
-    # Copy the CSS file
-    if os.path.exists(css_path):
-        shutil.copy(css_path, os.path.join(output_folder, 'test_style.css'))
+    # Ensure the CSS file exists and has mobile-responsive rules
+    write_responsive_css(css_path, os.path.join(output_folder, 'test_style.css'))
     
-    print(f"[SUCCESS] Processed {count} chapters into {output_folder}. Existing files were preserved.")
+    print(f"[SUCCESS] Processed {count} chapters into {output_folder}. Mobile-responsive meta-tags added.")
+
+def write_responsive_css(src_path, dest_path):
+    """Copies existing CSS and appends mobile-responsive rules if missing."""
+    responsive_rules = """
+/* Mobile Responsive Overrides */
+.chapter-header-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 40px;
+    gap: 30px;
+}
+.chapter-illustration img {
+    width: 100%;
+    max-width: 500px;
+    border-radius: 8px;
+    box-shadow: 0 4px 8px rgba(0,0,0,0.2);
+}
+@media (max-width: 768px) {
+    .chapter-header-row {
+        flex-direction: column-reverse;
+        text-align: center;
+        gap: 20px;
+    }
+    .chapter-title {
+        font-size: 1.8em !important;
+    }
+    .chapter-illustration img {
+        max-width: 100%;
+    }
+    .chapter-grid {
+        grid-template-columns: repeat(auto-fill, minmax(80px, 1fr)) !important;
+    }
+}
+"""
+    content = ""
+    if os.path.exists(src_path):
+        with open(src_path, 'r') as f:
+            content = f.read()
+    
+    if ".chapter-header-row" not in content:
+        content += responsive_rules
+
+    with open(dest_path, 'w') as f:
+        f.write(content)
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="Render a Henry James scene via DALL-E.")
-    parser.add_argument("--output", type=str, required=True)
-    parser.add_argument("--description", type=str, required=True, help="JSON string OR path to a JSON file")
+    parser = argparse.ArgumentParser(description="Convert EPUB to Jekyll-ready HTML with responsive design.")
+    parser.add_argument("-i", "--input", required=True, help="Path to the source EPUB")
+    parser.add_argument("-o", "--output_folder", required=True, help="Target directory for HTML files")
+    parser.add_argument("--css", default=DEFAULT_CSS_PATH, help="Path to the source test_style.css")
 
     args = parser.parse_args()
-
-    # Check if the description argument is a path to a file
-    if os.path.exists(args.description):
-        with open(args.description, 'r') as f:
-            description_content = f.read()
-    else:
-        description_content = args.description
-
-    render_scene_to_png(description_content, args.output)
-
+    epub_to_jekyll_htmlz(args.input, args.css, args.output_folder)
+    
